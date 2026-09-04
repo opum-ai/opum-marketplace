@@ -1,0 +1,9 @@
+# Machine- and user-specific Claude Code settings never enter public history.
+.claude/settings.local.json
+
+# Eval run artifacts.
+**/evals/results/
+*-workspace/
+
+.DS_Store
+node_modules/
