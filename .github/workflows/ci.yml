@@ -1,0 +1,127 @@
+name: ci
+
+# Deliberately NOT `on: [push, pull_request]`. That fires both events for a
+# branch pushed to this repo and opened as a PR, running every job twice on the
+# same SHA - which is the exact bug the task-before-branch eval case is built
+# around. Push is scoped to the long-lived branches only.
+on:
+  pull_request:
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+    inputs:
+      run_eval:
+        description: Run the paid plugin eval suite
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Free, deterministic, and runs on everything. Enforces the eval suite's
+  # structural invariants without a model or an API key.
+  structure:
+    name: check · eval structure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/check-evals.mjs
+
+  # Validates every plugin and marketplace manifest parses and matches itself.
+  manifest:
+    name: check · manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Manifests are valid JSON and agree on the plugin name
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const plugin = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json", "utf8"));
+            const market = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json", "utf8"));
+            const named = market.plugins.map((p) => p.name);
+            if (!named.includes(plugin.name)) {
+              throw new Error(`marketplace.json does not list ${plugin.name}; it lists ${named.join(", ")}`);
+            }
+            for (const p of market.plugins) {
+              if (!fs.existsSync(p.source)) throw new Error(`${p.name} source ${p.source} does not exist`);
+            }
+            console.log(`manifests OK (${named.length} plugin(s): ${named.join(", ")})`);
+          '
+
+  # The PLAN.md 5.3 ship gate. Costs real money per run (~$6 for the full suite
+  # at 3 runs x 2 arms x 4 cases), so it is scoped to changes that can actually
+  # move it, plus manual dispatch.
+  #
+  # --scaffold runs each case's scaffold_script. Those scripts execute on this
+  # runner, so evals/*/setup.sh are review-sensitive files: treat a PR touching
+  # one the way you would treat a PR touching the workflow itself.
+  #
+  # The command is NOT piped. A shell pipeline reports its LAST stage's exit
+  # status, so piping through tee or tail would turn a failing suite into a
+  # green check.
+  eval:
+    name: check · plugin eval
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && inputs.run_eval)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Did this change touch the skill or the eval suite?
+        id: scope
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref || 'dev' }}"
+          if git diff --name-only "origin/${{ github.base_ref || 'dev' }}...HEAD" \
+             | grep -qE '^(skills/|evals/|\.claude-plugin/)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No skill or eval changes; skipping the paid suite."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.scope.outputs.run == 'true'
+        with:
+          node-version: '22'
+
+      - name: Install Claude Code
+        if: steps.scope.outputs.run == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run the eval suite
+        if: steps.scope.outputs.run == 'true'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # plugin eval is early access and gated on this flag.
+          CLAUDE_CODE_WALNUT_SPIRE: '1'
+        run: |
+          claude plugin eval . \
+            --ablation with-without \
+            --judge-model sonnet \
+            --scaffold \
+            --no-publish \
+            --threshold 1 \
+            --max-cost-usd 15 \
+            --json eval-result.json
+
+      - name: Upload the eval report
+        if: steps.scope.outputs.run == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-eval-report
+          path: |
+            eval-result.json
+            evals/results/
+          if-no-files-found: warn
