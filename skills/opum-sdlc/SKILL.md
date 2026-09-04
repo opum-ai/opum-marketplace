@@ -158,7 +158,7 @@ the branch.
 
 ## Auditing the estate
 
-The orchestrator repository carries `tooling/opum-fleet/bin/sdlc-audit.mjs`,
+The orchestrator repository carries `tooling/sdlc-audit/bin/sdlc-audit.mjs`,
 which prints every hygiene fact across the fleet in one command - dead branches,
 unlanded branches, dirty worktrees, orphan lease directories, missing settings,
 unpromoted commits. Exit 0 means nothing actionable, exit 6 means findings, and
