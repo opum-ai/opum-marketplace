@@ -58,9 +58,20 @@ jobs:
             console.log(`manifests OK (${named.length} plugin(s): ${named.join(", ")})`);
           '
 
-  # The PLAN.md 5.3 ship gate. Costs real money per run (~$6 for the full suite
-  # at 3 runs x 2 arms x 4 cases), so it is scoped to changes that can actually
-  # move it, plus manual dispatch.
+  # The PLAN.md 5.3 ship gate. MANUAL DISPATCH ONLY - it is deliberately not
+  # wired to pull_request.
+  #
+  # In CI this job authenticates with ANTHROPIC_API_KEY, which is metered per
+  # token: one full suite is ~$4.75 of real API spend. Run automatically on every
+  # PR touching evals/ or skills/, that is a recurring charge for an answer that
+  # changes rarely. Run the suite locally instead, where it uses the machine's
+  # existing Claude Code auth, and record the result in the PR body:
+  #
+  #   node scripts/check-evals.mjs        # free, always
+  #   ./scripts/run-eval.sh               # the paid gate, on demand
+  #
+  # This job exists for the cases where local is not enough: confirming the suite
+  # passes on a clean checkout, or re-running the gate without a workstation.
   #
   # --scaffold runs each case's scaffold_script. Those scripts execute on this
   # runner, so evals/*/setup.sh are review-sensitive files: treat a PR touching
@@ -72,36 +83,18 @@ jobs:
   eval:
     name: check · plugin eval
     runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'pull_request' ||
-      (github.event_name == 'workflow_dispatch' && inputs.run_eval)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_eval
     steps:
       - uses: actions/checkout@v4
 
-      - name: Did this change touch the skill or the eval suite?
-        id: scope
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref || 'dev' }}"
-          if git diff --name-only "origin/${{ github.base_ref || 'dev' }}...HEAD" \
-             | grep -qE '^(skills/|evals/|\.claude-plugin/)'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No skill or eval changes; skipping the paid suite."
-          fi
-
       - uses: actions/setup-node@v4
-        if: steps.scope.outputs.run == 'true'
         with:
           node-version: '22'
 
       - name: Install Claude Code
-        if: steps.scope.outputs.run == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
       - name: Run the eval suite
-        if: steps.scope.outputs.run == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           # plugin eval is early access and gated on this flag.
@@ -117,7 +110,7 @@ jobs:
             --json eval-result.json
 
       - name: Upload the eval report
-        if: steps.scope.outputs.run == 'true' && always()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: plugin-eval-report
