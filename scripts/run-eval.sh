@@ -22,15 +22,22 @@ cd "$(dirname "$0")/.."
 
 node scripts/check-evals.mjs
 
+# `set -e` would abort here on a failing suite before the summary printed, so the
+# exit status is captured explicitly and re-raised at the end. A failing gate
+# must still show WHICH case failed.
+status=0
 claude plugin eval . \
   --ablation with-without \
   --judge-model sonnet \
   --scaffold \
   --no-publish \
   --threshold 1 \
-  --json evals/results/local.json
+  --json evals/results/local.json || status=$?
 
-status=$?
+if [ ! -f evals/results/local.json ]; then
+  echo "eval produced no result file; exiting $status" >&2
+  exit "${status:-1}"
+fi
 node -e '
   const r = require("./evals/results/local.json");
   const a = r.aggregates;
