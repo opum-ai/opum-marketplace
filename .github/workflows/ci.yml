@@ -58,6 +58,34 @@ jobs:
             console.log(`manifests OK (${named.length} plugin(s): ${named.join(", ")})`);
           '
 
+      # A plugin's version in its manifest is how the harness resolves updates.
+      # Ship content without bumping it and `claude plugin update` answers
+      # "already at the latest version" - consumers keep the old copy forever and
+      # nothing anywhere reports a problem. That happened once: the session hooks
+      # landed at 0.1.0 and were invisible to every installed plugin until the
+      # version moved.
+      - name: Plugin content changed means the version moved
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+
+          if ! git diff --quiet "$base...HEAD" -- skills/ hooks/ agents/ commands/ .claude-plugin/; then
+            before=$(git show "$base:.claude-plugin/plugin.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')
+            after=$(node -e 'console.log(require("./.claude-plugin/plugin.json").version)')
+            if [ "$before" = "$after" ]; then
+              echo "::error::plugin content changed but version is still $before."
+              echo "Files changed:"
+              git diff --name-only "$base...HEAD" -- skills/ hooks/ agents/ commands/ .claude-plugin/ | sed 's/^/  - /'
+              echo "Bump .claude-plugin/plugin.json - the manifest version is how the harness resolves updates."
+              exit 1
+            fi
+            echo "plugin content changed, version $before -> $after: OK"
+          else
+            echo "no plugin content changed; version bump not required"
+          fi
+
   # The PLAN.md 5.3 ship gate. MANUAL DISPATCH ONLY - it is deliberately not
   # wired to pull_request.
   #
