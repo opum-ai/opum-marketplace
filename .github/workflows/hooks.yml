@@ -1,0 +1,76 @@
+name: hooks
+
+# Separate from ci.yml deliberately, for now: that file arrives on the OPAG-45
+# branch and creating it here too would guarantee a merge conflict. Fold this
+# job into ci.yml once both have landed.
+#
+# Not `on: [push, pull_request]` - that fires both events for a branch pushed
+# here and opened as a PR, running every job twice on the same SHA.
+on:
+  pull_request:
+    paths:
+      - 'hooks/**'
+      - '.github/workflows/hooks.yml'
+  push:
+    branches: [dev, main]
+    paths:
+      - 'hooks/**'
+      - '.github/workflows/hooks.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: check · hooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hook behaviour
+        run: sh hooks/test/run-tests.sh
+
+      - name: hooks.json is valid and names no absolute path
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          manifest = json.loads(pathlib.Path("hooks/hooks.json").read_text())
+          events = manifest["hooks"]
+          problems = []
+
+          for event, groups in events.items():
+              for group in groups:
+                  for hook in group["hooks"]:
+                      cmd = hook["command"]
+                      if "${CLAUDE_PLUGIN_ROOT}" not in cmd:
+                          problems.append(f"{event}: {cmd} does not resolve from CLAUDE_PLUGIN_ROOT")
+                      if "/Volumes/" in cmd or "/Users/" in cmd:
+                          problems.append(f"{event}: {cmd} contains a machine-specific absolute path")
+                      script = cmd.split("${CLAUDE_PLUGIN_ROOT}/")[-1]
+                      if not pathlib.Path(script).exists():
+                          problems.append(f"{event}: {script} does not exist")
+
+          if problems:
+              print("hooks.json check: FAIL")
+              for p in problems:
+                  print(f"  - {p}")
+              sys.exit(1)
+          print(f"hooks.json check: OK ({len(events)} events)")
+          PY
+
+      - name: Every hook is POSIX sh and executable
+        run: |
+          set -euo pipefail
+          fail=0
+          for f in hooks/*.sh hooks/test/*.sh; do
+            sh -n "$f" || { echo "  - $f is not valid POSIX sh"; fail=1; }
+            [ -x "$f" ] || { echo "  - $f is not executable"; fail=1; }
+          done
+          [ "$fail" -eq 0 ] && echo "shell check: OK"
+          exit "$fail"
