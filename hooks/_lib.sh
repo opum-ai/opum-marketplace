@@ -22,8 +22,14 @@ opum_real_path() {
   ( cd "$_p" 2>/dev/null && pwd -P ) || printf '%s' "$_p"
 }
 
+# .claude/handovers/ - PLURAL, and that is load-bearing rather than a spelling
+# preference. All five fleet repositories already gitignore that exact path, and
+# four of them already have the directory. The singular .claude/handover/ is
+# ignored by none of them, so a cursor written there is an untracked file sitting
+# in a working tree waiting to be swept into a commit - session state leaking into
+# git in every repo at once.
 opum_cursor_path() {
-  printf '%s/.claude/handover/cursor.md' "$(opum_project_dir)"
+  printf '%s/.claude/handovers/cursor.md' "$(opum_project_dir)"
 }
 
 opum_has_quest() {

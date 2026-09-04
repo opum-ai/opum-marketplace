@@ -75,6 +75,12 @@ Two guards:
 
 The actor kind is always `delegated-agent`. A session is never `human`.
 
+## Where the cursor lives
+
+`.claude/handovers/cursor.md` — **plural**, deliberately. Every fleet repository
+already gitignores that path; none ignores the singular form. A cursor written to
+an untracked path is session state waiting to be swept into a commit.
+
 ## Configuration
 
 | variable | default | purpose |

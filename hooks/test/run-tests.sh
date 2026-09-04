@@ -37,7 +37,7 @@ echo "AC3 - a read-and-reason session with no file edits still produces a usable
 sandbox
 sh "$HOOKS/pre-compact.sh" >/dev/null 2>&1
 check "exit 0" "$?" "0"
-CUR="$SB/.claude/handover/cursor.md"
+CUR="$SB/.claude/handovers/cursor.md"
 [ -f "$CUR" ] && ok "cursor written with zero edits made" || bad "no cursor written"
 grep -q 'OPRB-7' "$CUR" 2>/dev/null && ok "cursor names the live task, not an edit checkpoint" || bad "task missing"
 grep -q 'Branch:' "$CUR" 2>/dev/null && ok "cursor records live repository state" || bad "branch missing"
@@ -60,15 +60,15 @@ cleanup
 
 echo "Defect 1 - SessionStart must NOT delete the cursor it reads"
 sandbox
-mkdir -p "$SB/.claude/handover"; printf '# cursor\nprevious session state\n' > "$SB/.claude/handover/cursor.md"
+mkdir -p "$SB/.claude/handovers"; printf '# cursor\nprevious session state\n' > "$SB/.claude/handovers/cursor.md"
 sh "$HOOKS/session-start.sh" >/dev/null 2>&1
-[ -f "$SB/.claude/handover/cursor.md" ] && ok "cursor survives being read" || bad "cursor was deleted (the lore-cli defect)"
+[ -f "$SB/.claude/handovers/cursor.md" ] && ok "cursor survives being read" || bad "cursor was deleted (the lore-cli defect)"
 sh "$HOOKS/session-start.sh" 2>/dev/null | grep -q 'previous session state' && ok "cursor contents are surfaced" || bad "cursor not surfaced"
 cleanup
 
 echo "AC2 - trust order: tracker and repository outrank the cursor"
 sandbox
-mkdir -p "$SB/.claude/handover"; printf 'stale cursor claim\n' > "$SB/.claude/handover/cursor.md"
+mkdir -p "$SB/.claude/handovers"; printf 'stale cursor claim\n' > "$SB/.claude/handovers/cursor.md"
 OUT=$(sh "$HOOKS/session-start.sh" 2>/dev/null)
 T=$(printf '%s\n' "$OUT" | grep -o 'Tracker (live)' | head -1)
 [ -n "$T" ] && ok "tracker section present" || bad "no tracker section"
@@ -131,6 +131,17 @@ if [ -n "$ORC" ] && [ -n "$ROOT" ] && [ "$ROOT" -lt "$ORC" ]; then
   ok "ORCHESTRATOR_CWD is derived after the fleet root is set"
 else bad "ORCHESTRATOR_CWD line $ORC precedes root line $ROOT"; fi
 rm -rf "$FT"
+
+echo "Cursor lives at a path the fleet already gitignores"
+sandbox
+printf '.claude/handovers/\n' > "$SB/.gitignore"
+git -C "$SB" add -A >/dev/null 2>&1; git -C "$SB" commit -qm ignore 2>/dev/null
+sh "$HOOKS/pre-compact.sh" >/dev/null 2>&1
+CUR2=$(cd "$SB" && git check-ignore .claude/handovers/cursor.md 2>/dev/null)
+[ -n "$CUR2" ] && ok "cursor path is gitignored (plural .claude/handovers/)" || bad "cursor path is NOT gitignored - session state can be committed"
+[ -f "$SB/.claude/handovers/cursor.md" ] && ok "cursor written to the plural path" || bad "cursor not at the plural path"
+[ ! -d "$SB/.claude/handover" ] && ok "no singular .claude/handover/ created" || bad "singular path still used"
+cleanup
 
 echo ""
 echo "passed $PASS, failed $FAIL"
