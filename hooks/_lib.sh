@@ -39,10 +39,18 @@ opum_has_quest() {
 # The single In Progress task, if there is exactly one. Ambiguity is not
 # resolved by guessing: two in-progress tasks means the hook records nothing to
 # the tracker and says so in the cursor instead.
+#
+# quest emits the list as ONE line of minified JSON. A sed substitution runs
+# once per line, and its leading `.*` is greedy, so `s/.*"id":"(...)".*/\1/`
+# matches the LAST "id" on the line and silently drops every other task - with
+# three In Progress tasks this returned exactly one id, never the "several"
+# case callers depend on. grep -o emits every non-overlapping match on its own
+# line, so each id survives into the sort -u/head -2 below.
 opum_active_task() {
   opum_has_quest || return 1
   quest task list --status "In Progress" --json 2>/dev/null \
-    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([A-Z][A-Z0-9]*-[0-9][0-9.]*\)".*/\1/p' \
+    | grep -o '"id"[[:space:]]*:[[:space:]]*"[A-Z][A-Z0-9]*-[0-9][0-9.]*"' \
+    | sed 's/.*"\([A-Z][A-Z0-9]*-[0-9][0-9.]*\)"$/\1/' \
     | sort -u | head -2 | tr '\n' ' ' | sed 's/ $//'
 }
 

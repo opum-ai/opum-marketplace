@@ -21,7 +21,13 @@ sandbox() {
   cat > "$SB/bin/quest" <<'Q'
 #!/bin/sh
 case "$*" in
-  *"task list"*) echo '{"data":{"tasks":[{"id":"OPRB-7","title":"stub"}]}}' ;;
+  *"task list"*)
+    if [ -n "${QUEST_TASK_LIST_JSON:-}" ]; then
+      printf '%s\n' "$QUEST_TASK_LIST_JSON"
+    else
+      echo '{"data":{"tasks":[{"id":"OPRB-7","title":"stub"}]}}'
+    fi
+    ;;
   *"task view"*) echo "id: OPRB-7"; echo "title: stub task" ;;
   *"task edit"*) echo "$*" >> "${QUEST_EDIT_LOG:-/dev/null}" ;;
 esac
@@ -87,6 +93,33 @@ OPUM_HOOK_ACTOR=test-actor OPUM_HOOK_ACCOUNTABLE_HUMAN=test-human sh "$HOOKS/pre
 grep -q 'task edit' "$SB/edits.log" 2>/dev/null && ok "tracker note written when actor is declared" || bad "no tracker write"
 grep -q 'actor-kind delegated-agent' "$SB/edits.log" 2>/dev/null && ok "declares delegated-agent, never human" || bad "wrong actor-kind"
 unset QUEST_EDIT_LOG
+cleanup
+
+echo "OMARK-4 - opum_active_task must return every In Progress id, not just the last"
+sandbox
+export QUEST_TASK_LIST_JSON='{"data":{"tasks":[{"id":"QCLI-196","title":"a"},{"id":"QCLI-207","title":"b"},{"id":"QCLI-238","title":"c"}]}}'
+. "$HOOKS/_lib.sh"
+OUT=$(opum_active_task)
+check "three In Progress tasks -> two ids, space-joined (sorted, capped)" "$OUT" "QCLI-196 QCLI-207"
+case "$OUT" in
+  *QCLI-238*) bad "regression: the last id (QCLI-238) leaked back in" ;;
+  QCLI-238)   bad "regression: collapsed to only the last id (the defect this guards)" ;;
+  *)          ok "does not silently collapse to the last id alone" ;;
+esac
+unset QUEST_TASK_LIST_JSON
+cleanup
+
+echo "OMARK-4 - flush-state must withhold the tracker note when several tasks are In Progress"
+sandbox
+export QUEST_EDIT_LOG="$SB/edits.log"
+export QUEST_TASK_LIST_JSON='{"data":{"tasks":[{"id":"QCLI-196","title":"a"},{"id":"QCLI-207","title":"b"},{"id":"QCLI-238","title":"c"}]}}'
+OPUM_HOOK_ACTOR=test-actor OPUM_HOOK_ACCOUNTABLE_HUMAN=test-human sh "$HOOKS/pre-compact.sh" >/dev/null 2>&1
+[ ! -s "$SB/edits.log" ] && ok "no tracker note written while ambiguous" || bad "note written despite ambiguity: $(cat "$SB/edits.log" 2>/dev/null)"
+CUR3="$SB/.claude/handovers/cursor.md"
+grep -q 'Ambiguous' "$CUR3" 2>/dev/null && ok "cursor records the ambiguity" || bad "cursor missing ambiguity note"
+grep -q 'QCLI-196' "$CUR3" 2>/dev/null && grep -q 'QCLI-207' "$CUR3" 2>/dev/null \
+  && ok "cursor names more than one ambiguous id" || bad "cursor does not show multiple ids"
+unset QUEST_TASK_LIST_JSON QUEST_EDIT_LOG
 cleanup
 
 echo "AC1 - failure paths"
