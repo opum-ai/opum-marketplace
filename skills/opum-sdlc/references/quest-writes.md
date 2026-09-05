@@ -53,9 +53,12 @@ in the notes.
 
 ## Hooks and other unattended writers
 
-A hook is a script and has no session identity, so supply `QUEST_ACTOR` and
-`QUEST_ACCOUNTABLE_HUMAN` as environment in the repository's settings rather
-than hardcoding an identity into anything shipped publicly.
+A hook is a script and has no session identity, so supply `OPUM_HOOK_ACTOR` and
+`OPUM_HOOK_ACCOUNTABLE_HUMAN` as `env` in the repository's committed
+`.claude/settings.json`, rather than hardcoding an identity into anything shipped
+publicly. Those are the names `hooks/flush-state.sh` actually reads; an earlier
+revision of this page named `QUEST_ACTOR`/`QUEST_ACCOUNTABLE_HUMAN`, which set
+nothing and left the write silently skipped.
 
 **A hook must never break the session.** Every failure path exits 0. A tracker
 write failing at compaction time must not wedge the work.
