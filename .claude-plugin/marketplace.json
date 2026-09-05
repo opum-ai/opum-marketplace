@@ -30,6 +30,20 @@
       },
       "category": "documentation",
       "homepage": "https://github.com/opum-ai/lore-cli"
+    },
+    {
+      "name": "opum-quest",
+      "description": "Drive the quest CLI: file, plan, record and complete tracker work in a Quest workspace. Federated: pinned to the quest-cli release tag so the skill cannot drift from the CLI it describes.",
+      "author": {
+        "name": "Opum"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/quest-cli",
+        "ref": "v0.3.4"
+      },
+      "category": "workflow",
+      "homepage": "https://github.com/opum-ai/quest-cli"
     }
   ]
 }

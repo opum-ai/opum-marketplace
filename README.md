@@ -30,8 +30,9 @@ owns it.
 
 A federated entry is added **in the same change that creates the plugin it names**.
 An index that lists a plugin which does not resolve is broken for everyone who
-adds the marketplace, so `opum-lore` and `opum-quest` appear above as the intended
-shape and are absent from `marketplace.json` until their plugins exist.
+adds the marketplace, so a federated entry is absent from `marketplace.json`
+until its plugin exists at the pinned tag. `opum-lore` and `opum-quest` both
+resolve now.
 
 ## What `opum-workflow` ships
 
