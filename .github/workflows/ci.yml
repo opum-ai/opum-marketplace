@@ -40,7 +40,12 @@ jobs:
     name: check · manifests
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0, deliberately. The default shallow checkout has no merge
+      # base with the base branch, so the diff below exits 128 instead of
+      # answering - see the comment on that step.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Manifests are valid JSON and agree on the plugin name
         run: |
           set -euo pipefail
@@ -69,15 +74,35 @@ jobs:
         run: |
           set -euo pipefail
           base="origin/${{ github.base_ref }}"
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          git fetch --no-tags origin "${{ github.base_ref }}"
 
-          if ! git diff --quiet "$base...HEAD" -- skills/ hooks/ agents/ commands/ .claude-plugin/; then
+          # Resolve the merge base explicitly rather than relying on `A...B`.
+          #
+          # This step used to shallow-fetch with --depth=1 and ask `git diff
+          # --quiet "$base...HEAD"`. Two shallow histories have NO merge base, so
+          # that diff exited 128 rather than answering - and `if ! git diff` reads
+          # any nonzero status as "there is a diff". The check therefore reported
+          # "plugin content changed" on every pull request, and passed only when
+          # the version happened to have moved anyway. It had the shape of a gate
+          # while measuring nothing, which is worse than not having it: the one
+          # PR it should have caught would have looked exactly like the ones it
+          # waved through.
+          #
+          # Failing to find a merge base is now fatal and says so, instead of
+          # being silently indistinguishable from a real change.
+          if ! merge_base=$(git merge-base "$base" HEAD); then
+            echo "::error::no merge base between $base and HEAD - cannot tell what this PR changed."
+            exit 1
+          fi
+
+          changed=$(git diff --name-only "$merge_base" HEAD -- skills/ hooks/ agents/ commands/ .claude-plugin/)
+          if [ -n "$changed" ]; then
             before=$(git show "$base:.claude-plugin/plugin.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')
             after=$(node -e 'console.log(require("./.claude-plugin/plugin.json").version)')
             if [ "$before" = "$after" ]; then
               echo "::error::plugin content changed but version is still $before."
               echo "Files changed:"
-              git diff --name-only "$base...HEAD" -- skills/ hooks/ agents/ commands/ .claude-plugin/ | sed 's/^/  - /'
+              printf '%s\n' "$changed" | sed 's/^/  - /'
               echo "Bump .claude-plugin/plugin.json - the manifest version is how the harness resolves updates."
               exit 1
             fi
