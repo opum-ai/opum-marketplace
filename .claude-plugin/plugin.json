@@ -1,6 +1,6 @@
 {
   "name": "opum-workflow",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "The Opum fleet's shared workflow: the SDLC skill that governs task-before-branch delivery, session handover, and the engineering and documentation skills the fleet reviews against. Use when working in an Opum repository, or as a worked example of a Quest-tracked, Lore-documented delivery loop.",
   "author": {
     "name": "Opum",
@@ -9,5 +9,5 @@
   "homepage": "https://github.com/opum-ai/opum-marketplace",
   "repository": "https://github.com/opum-ai/opum-marketplace",
   "license": "MIT",
-  "keywords": ["workflow", "sdlc", "handover", "quest", "lore"]
+  "keywords": ["workflow", "sdlc", "handoff", "handover", "quest", "lore", "session"]
 }
