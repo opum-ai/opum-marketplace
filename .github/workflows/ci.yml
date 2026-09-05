@@ -57,8 +57,24 @@ jobs:
             if (!named.includes(plugin.name)) {
               throw new Error(`marketplace.json does not list ${plugin.name}; it lists ${named.join(", ")}`);
             }
+            // A source is either a local path (this repository's own plugin) or,
+            // for a federated entry, an object naming another repository. The
+            // path form must exist here. The object form cannot be checked for
+            // existence without the network, so check its shape instead - and
+            // require a pin, because the fleet decided (OPAG-37) that a federated
+            // skill is cut from the same release tag as the CLI it describes; an
+            // unpinned entry would track the default branch and drift from it.
             for (const p of market.plugins) {
-              if (!fs.existsSync(p.source)) throw new Error(`${p.name} source ${p.source} does not exist`);
+              const s = p.source;
+              if (typeof s === "string") {
+                if (!fs.existsSync(s)) throw new Error(`${p.name} source ${s} does not exist`);
+                continue;
+              }
+              if (!s || typeof s !== "object") throw new Error(`${p.name} source is neither a path nor an object`);
+              if (!["github", "git-subdir"].includes(s.source)) throw new Error(`${p.name} source kind ${s.source} is not github or git-subdir`);
+              if (s.source === "github" && !/^[\w.-]+\/[\w.-]+$/.test(s.repo || "")) throw new Error(`${p.name} github source needs repo as owner/name, got ${s.repo}`);
+              if (s.source === "git-subdir" && !(s.url && s.path)) throw new Error(`${p.name} git-subdir source needs url and path`);
+              if (!(s.ref || s.sha)) throw new Error(`${p.name} federated source must pin ref or sha; unpinned entries track the default branch and drift from the CLI they describe`);
             }
             console.log(`manifests OK (${named.length} plugin(s): ${named.join(", ")})`);
           '
