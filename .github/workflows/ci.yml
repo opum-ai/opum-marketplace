@@ -79,6 +79,14 @@ jobs:
             console.log(`manifests OK (${named.length} plugin(s): ${named.join(", ")})`);
           '
 
+      # Free, deterministic, no network: proves the checker two steps down
+      # actually fails on the v0.4.3-shaped defect (ref names one version,
+      # plugin.json declares another), against a local fixture server. Runs
+      # unconditionally so a regression in the checker itself is caught even
+      # on a push that never touches marketplace.json.
+      - name: Federated pin checker has a passing regression test
+        run: node scripts/test/check-federated-pins.test.mjs
+
       # A plugin's version in its manifest is how the harness resolves updates.
       # Ship content without bumping it and `claude plugin update` answers
       # "already at the latest version" - consumers keep the old copy forever and
@@ -131,6 +139,40 @@ jobs:
           else
             echo "no plugin content changed; version bump not required"
           fi
+
+      # A federated entry pins a tag so its skill can never drift from the CLI
+      # it describes (OPAG-37) - but a pin only does that if the tagged
+      # release actually carries the content the pin implies. lore-cli's
+      # v0.4.3 tag bumped its own package.json but not
+      # .claude-plugin/plugin.json, so opum-marketplace pinned a tag whose
+      # plugin manifest still read the PREVIOUS version - `claude plugin
+      # update` saw no version change and silently kept serving the old
+      # skill. Nothing caught it; it was found by hand, twice (OMARK-2,
+      # OMARK-6). scripts/check-federated-pins.mjs is a self-consistency
+      # check, not a diff against the previous pin: a pinned ref's own
+      # plugin.json must declare that same version.
+      #
+      # Gated on marketplace.json changing in this PR - the pinned tags don't
+      # change on their own, so a PR that doesn't touch the index can't have
+      # introduced a bad one, and skipping the network read keeps an
+      # unrelated PR (a hooks fix, say) from failing on a transient GitHub
+      # API problem in a repository it never touched.
+      - name: Federated entry pins match their own plugin version
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          git fetch --no-tags origin "${{ github.base_ref }}"
+          if ! merge_base=$(git merge-base "$base" HEAD); then
+            echo "::error::no merge base between $base and HEAD - cannot tell what this PR changed."
+            exit 1
+          fi
+          changed=$(git diff --name-only "$merge_base" HEAD -- .claude-plugin/marketplace.json)
+          if [ -z "$changed" ]; then
+            echo "marketplace.json unchanged; skipping the federated pin check (no network read)."
+            exit 0
+          fi
+          node scripts/check-federated-pins.mjs
 
   # The PLAN.md 5.3 ship gate. MANUAL DISPATCH ONLY - it is deliberately not
   # wired to pull_request.
