@@ -9,9 +9,17 @@
 # CI does NOT run this automatically: in CI the suite bills ANTHROPIC_API_KEY per
 # token, whereas here it uses whatever Claude Code auth this machine already has.
 #
-# WHY THERE ARE TWO MODES, measured rather than guessed. The gate bills per run
-# across ALL cases, and cost tracks agent turns almost linearly - about $0.035
-# per turn per run. From the 2026-09-04 full run:
+# THAT DISTINCTION MATTERS AND THIS FILE USED TO IGNORE IT. Corrected 2026-09-04:
+# the runner's `costUsd` is a computed token cost at API list prices, emitted
+# whatever the run was authenticated with. On a machine with no ANTHROPIC_API_KEY
+# - which is how this repository is run - the eval goes through the Claude Code
+# subscription and nothing is billed per token. The dollars below are an estimate
+# of what CI would pay, not what a local run costs.
+#
+# WHY THERE ARE TWO MODES, measured rather than guessed. The gate re-runs every
+# case every time, and everything that matters - tokens, seconds, subscription
+# usage, and API dollars where those apply - tracks agent turns almost linearly,
+# at about $0.035 per turn per run. From the 2026-09-04 full run:
 #
 #   handoff-write-mechanics   15.0 turns   $3.15      scaffolded, reads a repo
 #   sdlc-task-before-branch   12.2 turns   $1.76      scaffolded, reads a repo
@@ -22,16 +30,19 @@
 #                                          -----
 #                                          $8.46 for two skills
 #
-# Two skills cost $8.46. Ten would cost roughly $33 a run, which is a gate nobody
-# runs, and a gate nobody runs is not a gate. The selective mode keeps the cost
-# proportional to what changed.
+# Two skills came to $8.46 estimated and 756 seconds. Ten would be roughly $33
+# and over half an hour. Locally the money is notional; the WALL CLOCK is not,
+# and a half-hour gate is one nobody runs before a small change - a gate nobody
+# runs is not a gate. The selective mode keeps that proportional to what changed.
+# An earlier revision of this comment rested the whole argument on dollars, which
+# was wrong for the way this repository actually runs it.
 #
 # The guards ALWAYS run, even the ones belonging to other skills, and that is the
 # whole point of the split. A skill's own behaviour is local to it; its
 # description is not. Descriptions compete for triggering, so adding or rewording
 # one skill can make a DIFFERENT skill fire on questions it used to ignore. At
-# about $0.70 each they are the cheapest cases in the suite, so there is no
-# reason to skip the only check that catches cross-skill regression.
+# one turn each they are the cheapest cases in the suite by a wide margin, so
+# there is no reason to skip the only check that catches cross-skill regression.
 #
 # `--case` takes ONE glob and understands no braces and no comma lists (measured:
 # `{a-*,b-*}` and `a-*,b-*` both match nothing). Selecting two groups therefore
