@@ -57,7 +57,7 @@ jobs:
             if (!named.includes(plugin.name)) {
               throw new Error(`marketplace.json does not list ${plugin.name}; it lists ${named.join(", ")}`);
             }
-            // A source is either a local path (this repository's own plugin) or,
+            // A source is either a local path (this repository owns the plugin) or,
             // for a federated entry, an object naming another repository. The
             // path form must exist here. The object form cannot be checked for
             // existence without the network, so check its shape instead - and
@@ -111,7 +111,12 @@ jobs:
             exit 1
           fi
 
-          changed=$(git diff --name-only "$merge_base" HEAD -- skills/ hooks/ agents/ commands/ .claude-plugin/)
+          # .claude-plugin/plugin.json, not the whole directory: marketplace.json is the
+          # index of every plugin, and a federated entry added there is not a change
+          # to opum-workflow's content, so it must not demand opum-workflow's version
+          # move - a bump with no content change tells every consumer to update for
+          # nothing.
+          changed=$(git diff --name-only "$merge_base" HEAD -- skills/ hooks/ agents/ commands/ .claude-plugin/plugin.json)
           if [ -n "$changed" ]; then
             before=$(git show "$base:.claude-plugin/plugin.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')
             after=$(node -e 'console.log(require("./.claude-plugin/plugin.json").version)')
