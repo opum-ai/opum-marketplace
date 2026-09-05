@@ -12,6 +12,7 @@ import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const EVAL_DIR = 'evals';
+const SKILLS_DIR = 'skills';
 const findings = [];
 const fail = (c, m) => findings.push(`${c}: ${m}`);
 
@@ -85,6 +86,33 @@ for (const name of cases) {
 
 if (shouldNotFire === 0) {
   fail('suite', 'no should-NOT-fire case - nothing guards against the skill over-triggering');
+}
+
+// Every case name starts with the skill it exercises, and every skill owns at
+// least one should-NOT-fire case. This is not tidiness: `--case` takes ONE glob
+// and understands no braces or comma lists, so `<skill>-*` and `*no-trigger*`
+// are the only two selections the runner can express. Break the convention and
+// the selective gate in run-eval.sh silently stops covering something.
+const skills = existsSync(SKILLS_DIR)
+  ? readdirSync(SKILLS_DIR).filter((d) => statSync(join(SKILLS_DIR, d)).isDirectory())
+  : [];
+
+for (const name of cases) {
+  if (!skills.some((sk) => name === sk || name.startsWith(`${sk}-`) || name.startsWith(`${sk.replace(/^opum-/, '')}-`))) {
+    fail(name, `case name does not start with a skill in ${SKILLS_DIR}/ (have: ${skills.join(', ')})`);
+  }
+}
+
+for (const sk of skills) {
+  const short = sk.replace(/^opum-/, '');
+  const owned = cases.filter((n) => n.startsWith(`${sk}-`) || n.startsWith(`${short}-`));
+  if (owned.length === 0) {
+    fail(sk, 'skill has no eval cases at all');
+    continue;
+  }
+  if (!owned.some((n) => /no[- ]trigger|should[- ]not/i.test(n))) {
+    fail(sk, 'skill has no should-NOT-fire case of its own - adding a skill can make ANOTHER skill over-trigger, so each one carries its own guard');
+  }
 }
 
 if (findings.length > 0) {
