@@ -26,7 +26,7 @@
       "source": {
         "source": "github",
         "repo": "opum-ai/lore-cli",
-        "ref": "v0.4.3"
+        "ref": "v0.4.4"
       },
       "category": "documentation",
       "homepage": "https://github.com/opum-ai/lore-cli"
