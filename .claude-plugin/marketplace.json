@@ -16,6 +16,20 @@
       "source": "./",
       "category": "workflow",
       "homepage": "https://github.com/opum-ai/opum-marketplace"
+    },
+    {
+      "name": "opum-lore",
+      "description": "Drive the lore CLI: author, retrieve, and maintain OKF documentation bundles, including explicit multi-repository workspaces. Federated: this entry pins the lore-cli release tag, so the skill is cut from the same tag as the CLI it describes and cannot drift from it.",
+      "author": {
+        "name": "Opum"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/lore-cli",
+        "ref": "v0.4.2"
+      },
+      "category": "documentation",
+      "homepage": "https://github.com/opum-ai/lore-cli"
     }
   ]
 }
