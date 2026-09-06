@@ -165,6 +165,39 @@ if [ -n "$ORC" ] && [ -n "$ROOT" ] && [ "$ROOT" -lt "$ORC" ]; then
 else bad "ORCHESTRATOR_CWD line $ORC precedes root line $ROOT"; fi
 rm -rf "$FT"
 
+echo "OMARK-10/OPAG-62 - agent_needs_input must not relay the orchestrator's own words back as this worker's question"
+# Observed 2026-09-06: the orchestrator's own idle turn ended with a sentence
+# asking the user to prompt other worker panes. Six times, a worker pane's own
+# Notification hook then fired with notification_type agent_needs_input and a
+# message that was the ORCHESTRATOR's sentence, and the hook faithfully relayed
+# it back as "[auto] <worker> is waiting: agent_needs_input. <msg>" -- the
+# worker never asked anything; the harness event was a byproduct of the
+# cross-session delivery, not a human-decision block. idle_prompt already gets
+# a transcript check to tell a real AskUserQuestion apart from a plain idle
+# (see the block above); agent_needs_input gets no equivalent check today and
+# passes straight through the case statement to the herdr prompt call.
+FT2=$(mktemp -d)
+FT2=$(cd "$FT2" && pwd -P)   # resolve now: the hook compares resolved paths only
+mkdir -p "$FT2/repos/opum-doc" "$FT2/repos/opum-agent" "$FT2/home/bin"
+PROMPTLOG="$FT2/home/prompt.log"
+cat > "$FT2/home/bin/herdr" <<EOF
+#!/bin/sh
+case "\$*" in
+  "agent list"*) printf '%s\n' '{"result":{"agents":[{"cwd":"$FT2/repos/opum-agent","pane_id":"pane1"}]}}' ;;
+  "agent prompt"*) printf '%s\n' "\$*" >> "$PROMPTLOG" ;;
+esac
+exit 0
+EOF
+chmod +x "$FT2/home/bin/herdr"
+printf '%s' '{"notification_type":"agent_needs_input","message":"opum-agent needs your input: go ahead and prompt opum-doc and quest-cli when you get a chance"}' > "$FT2/payload.json"
+( cd "$FT2/repos/opum-doc" && HOME="$FT2/home" PATH="$FT2/home/bin:$PATH" OPUM_FLEET_ROOT="$FT2/repos" sh "$HOOKS/notify-orchestrator.sh" < "$FT2/payload.json" >/dev/null 2>&1 )
+if [ -s "$PROMPTLOG" ]; then
+  bad "OPAG-62: relays the orchestrator's own sentence back as opum-doc's question (unfixed) -- $(cat "$PROMPTLOG")"
+else
+  ok "agent_needs_input naming the orchestrator, not this worker, as needing input is not relayed"
+fi
+rm -rf "$FT2"
+
 echo "Cursor lives at a path the fleet already gitignores"
 sandbox
 printf '.claude/handovers/\n' > "$SB/.gitignore"
