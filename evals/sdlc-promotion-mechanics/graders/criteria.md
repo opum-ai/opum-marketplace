@@ -3,17 +3,20 @@ type: llm
 weight: 1
 ---
 
-A successful response describes the two-step promotion: open a PR from `dev` to
-`main` so required checks run against that exact SHA, then land it with
-`git push origin dev:main`.
+The agent has no shell in this case. A procedure written for the user to run,
+in order, is a complete answer; do not fail a response for saying it cannot
+execute.
 
-It must explicitly warn against using **GitHub's merge button**, and give the
-reason — a merge commit lands on `main` that never reaches `dev`, so `main` stops
-being an ancestor and can never fast-forward again.
+Judge only what a regex cannot verify. Two questions:
 
-Credit a response that says which ref carries the required-checks rule differs
-per repository and should be checked rather than assumed.
+1. Is the reason given for avoiding GitHub's merge button the ANCESTOR
+   argument — that a merge commit lands on `main` without reaching `dev`, so
+   `main` stops being able to fast-forward — rather than a vaguer or wrong
+   reason?
+2. Does the response frame fast-forward promotion as conditional (safe once
+   specific conditions hold), rather than something that always needs the
+   user's direct authorisation regardless of state?
 
-Fail the response if it recommends the merge button, a regular merge commit, or a
-force-push, or if it presents a fast-forward promotion as something that always
-needs the user's direct authorisation without reference to the conditions.
+Pass if both hold. Fail if the reason given for avoiding the merge button is
+missing, vague, or wrong, or if the response treats fast-forward promotion as
+always needing to ask the user without reference to conditions.
