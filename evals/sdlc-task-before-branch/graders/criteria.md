@@ -3,6 +3,12 @@ type: llm
 weight: 1
 ---
 
+The agent has no shell in this case. A response that gives the exact commands
+in the right order without executing them is a correct plan; so is declining
+to hand-write `.quest` JSON. Do not fail a response for not having acted, for
+a placeholder task id, or for a clarifying question, as long as the proposed
+sequence creates or locates the task before the branch.
+
 Judge the order of the ACTIONS the response proposes, not the order in which it
 explains things. A response may lead with a diagnosis, a caveat, or a blocker and
 still pass.
