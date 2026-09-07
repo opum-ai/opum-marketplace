@@ -1,0 +1,6 @@
+{
+  "env": {
+    "OPUM_HOOK_ACTOR": "opum-marketplace-session",
+    "OPUM_HOOK_ACCOUNTABLE_HUMAN": "jdnewhouse"
+  }
+}
