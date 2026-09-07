@@ -26,7 +26,7 @@
       "source": {
         "source": "github",
         "repo": "opum-ai/lore-cli",
-        "ref": "v0.4.5"
+        "ref": "v0.4.6"
       },
       "category": "documentation",
       "homepage": "https://github.com/opum-ai/lore-cli"
@@ -40,7 +40,7 @@
       "source": {
         "source": "github",
         "repo": "opum-ai/quest-cli",
-        "ref": "v0.3.4"
+        "ref": "v0.4.0"
       },
       "category": "workflow",
       "homepage": "https://github.com/opum-ai/quest-cli"
