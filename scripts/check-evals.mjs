@@ -13,6 +13,7 @@ import { join } from 'node:path';
 
 const EVAL_DIR = 'evals';
 const SKILLS_DIR = 'skills';
+const AGENTS_DIR = 'agents';
 const findings = [];
 const fail = (c, m) => findings.push(`${c}: ${m}`);
 
@@ -88,18 +89,30 @@ if (shouldNotFire === 0) {
   fail('suite', 'no should-NOT-fire case - nothing guards against the skill over-triggering');
 }
 
-// Every case name starts with the skill it exercises, and every skill owns at
-// least one should-NOT-fire case. This is not tidiness: `--case` takes ONE glob
-// and understands no braces or comma lists, so `<skill>-*` and `*no-trigger*`
-// are the only two selections the runner can express. Break the convention and
-// the selective gate in run-eval.sh silently stops covering something.
+// Every case name starts with the skill or agent it exercises, and every
+// skill owns at least one should-NOT-fire case. This is not tidiness:
+// `--case` takes ONE glob and understands no braces or comma lists, so
+// `<skill>-*` and `*no-trigger*` are the only two selections the runner can
+// express. Break the convention and the selective gate in run-eval.sh
+// silently stops covering something.
 const skills = existsSync(SKILLS_DIR)
   ? readdirSync(SKILLS_DIR).filter((d) => statSync(join(SKILLS_DIR, d)).isDirectory())
   : [];
 
+// Agents live as flat agents/<name>.md files, not skills/<name>/SKILL.md
+// subdirectories, and only ones with real frontmatter count - a bare
+// agents/README.md must not be read as an agent named "README".
+const agents = existsSync(AGENTS_DIR)
+  ? readdirSync(AGENTS_DIR)
+      .filter((f) => f.endsWith('.md') && (frontmatter(join(AGENTS_DIR, f)) ?? {}).name)
+      .map((f) => f.slice(0, -3))
+  : [];
+
+const dispatchTargets = [...skills, ...agents];
+
 for (const name of cases) {
-  if (!skills.some((sk) => name === sk || name.startsWith(`${sk}-`) || name.startsWith(`${sk.replace(/^opum-/, '')}-`))) {
-    fail(name, `case name does not start with a skill in ${SKILLS_DIR}/ (have: ${skills.join(', ')})`);
+  if (!dispatchTargets.some((n) => name === n || name.startsWith(`${n}-`) || name.startsWith(`${n.replace(/^opum-/, '')}-`))) {
+    fail(name, `case name does not start with a skill in ${SKILLS_DIR}/ or an agent in ${AGENTS_DIR}/ (have: ${dispatchTargets.join(', ')})`);
   }
 }
 
@@ -113,6 +126,23 @@ for (const sk of skills) {
   if (!owned.some((n) => /no[- ]trigger|should[- ]not/i.test(n))) {
     fail(sk, 'skill has no should-NOT-fire case of its own - adding a skill can make ANOTHER skill over-trigger, so each one carries its own guard');
   }
+}
+
+// Agents are dispatched explicitly by name, not autonomously triggered by a
+// description the way skills are - nothing "over-fires" a subagent, so unlike
+// skills they do not each need their own no-trigger case. What they need
+// instead is one shared guard against skipping the pack-compilation
+// discipline when a delegated task looks trivial or off-profile - see the
+// eval-authoring reference's agent-dispatch section.
+for (const ag of agents) {
+  const owned = cases.filter((n) => n.startsWith(`${ag}-`));
+  if (owned.length === 0) {
+    fail(ag, 'agent has no eval cases at all');
+  }
+}
+
+if (agents.length > 0 && !cases.some((n) => /no[- ]mismatch/i.test(n))) {
+  fail('agents', 'no shared no-mismatch guard case exists for agents/ (a case matching *no-mismatch*)');
 }
 
 if (findings.length > 0) {
