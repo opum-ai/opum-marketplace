@@ -198,6 +198,33 @@ else
 fi
 rm -rf "$FT2"
 
+echo "OMARK-10/OPAG-62 - a genuine agent_needs_input still alerts (the fix must not over-suppress)"
+# The companion positive case: a message that does not match "<name> needs
+# your input:" at all -- an unrecognized shape, same as before the fix --
+# must still route to STUCK. Suppressing every agent_needs_input would trade
+# one silent failure for another.
+FT3=$(mktemp -d)
+FT3=$(cd "$FT3" && pwd -P)
+mkdir -p "$FT3/repos/opum-doc" "$FT3/repos/opum-agent" "$FT3/home/bin"
+PROMPTLOG3="$FT3/home/prompt.log"
+cat > "$FT3/home/bin/herdr" <<EOF
+#!/bin/sh
+case "\$*" in
+  "agent list"*) printf '%s\n' '{"result":{"agents":[{"cwd":"$FT3/repos/opum-agent","pane_id":"pane1"}]}}' ;;
+  "agent prompt"*) printf '%s\n' "\$*" >> "$PROMPTLOG3" ;;
+esac
+exit 0
+EOF
+chmod +x "$FT3/home/bin/herdr"
+printf '%s' '{"notification_type":"agent_needs_input","message":"waiting on a permission grant to continue"}' > "$FT3/payload.json"
+( cd "$FT3/repos/opum-doc" && HOME="$FT3/home" PATH="$FT3/home/bin:$PATH" OPUM_FLEET_ROOT="$FT3/repos" sh "$HOOKS/notify-orchestrator.sh" < "$FT3/payload.json" >/dev/null 2>&1 )
+if [ -s "$PROMPTLOG3" ]; then
+  ok "a message not shaped like the relay defect still alerts"
+else
+  bad "OPAG-62 fix over-suppressed: a genuinely unrecognized agent_needs_input went silent"
+fi
+rm -rf "$FT3"
+
 echo "Cursor lives at a path the fleet already gitignores"
 sandbox
 printf '.claude/handovers/\n' > "$SB/.gitignore"

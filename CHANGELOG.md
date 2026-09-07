@@ -14,6 +14,9 @@ at once. See `scripts/check-changelog-fold.mjs`.
   pack before acting (OMARK-13, OPAG-52).
 - Added `loop.md`, the fleet's default `/loop` prompt: starts every iteration
   from `quest task list --ready` (OMARK-13, OPAG-52).
+- Fixed `hooks/notify-orchestrator.sh` relaying a foreign session's own
+  "needs your input" message back as this worker's own alert (OMARK-10,
+  OPAG-62).
 
 ## 0.3.2
 
