@@ -9,6 +9,12 @@ at once. See `scripts/check-changelog-fold.mjs`.
 
 ## Unreleased
 
+- Added four subagent definitions (`implementer`, `reviewer`, `verifier`,
+  `documenter`) under `agents/`, each grounding in a Lore-compiled context
+  pack before acting (OMARK-13, OPAG-52).
+- Added `loop.md`, the fleet's default `/loop` prompt: starts every iteration
+  from `quest task list --ready` (OMARK-13, OPAG-52).
+
 ## 0.3.2
 
 Prior history was not tracked in this file; it predates this guard.
