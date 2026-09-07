@@ -93,7 +93,17 @@ jobs:
       # nothing anywhere reports a problem. That happened once: the session hooks
       # landed at 0.1.0 and were invisible to every installed plugin until the
       # version moved.
-      - name: Plugin content changed means the version moved
+      #
+      # Amended under OMARK-17 (OPAG-65's release freeze): a stacked release
+      # holds several tasks' content on dev at one version, folding them into
+      # a single bump at the end. Content changing with the version unchanged
+      # is no longer automatically a failure - it passes if CHANGELOG.md's
+      # `## Unreleased` section documents what's pending. The reverse is now
+      # also checked: a version bump must fold Unreleased into its own
+      # section, or a stacked pile of entries rides along, unfolded, into the
+      # next bump forever. See scripts/check-changelog-fold.mjs, which owns
+      # this half of the rule and is negative-tested on both directions.
+      - name: Plugin content changed means the version moved (or Unreleased says why not)
         if: github.event_name == 'pull_request'
         run: |
           set -euo pipefail
@@ -125,20 +135,15 @@ jobs:
           # move - a bump with no content change tells every consumer to update for
           # nothing.
           changed=$(git diff --name-only "$merge_base" HEAD -- skills/ hooks/ agents/ commands/ .claude-plugin/plugin.json)
+          before=$(git show "$base:.claude-plugin/plugin.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')
+          after=$(node -e 'console.log(require("./.claude-plugin/plugin.json").version)')
+          content_changed=false
           if [ -n "$changed" ]; then
-            before=$(git show "$base:.claude-plugin/plugin.json" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).version))')
-            after=$(node -e 'console.log(require("./.claude-plugin/plugin.json").version)')
-            if [ "$before" = "$after" ]; then
-              echo "::error::plugin content changed but version is still $before."
-              echo "Files changed:"
-              printf '%s\n' "$changed" | sed 's/^/  - /'
-              echo "Bump .claude-plugin/plugin.json - the manifest version is how the harness resolves updates."
-              exit 1
-            fi
-            echo "plugin content changed, version $before -> $after: OK"
-          else
-            echo "no plugin content changed; version bump not required"
+            content_changed=true
+            echo "Files changed:"
+            printf '%s\n' "$changed" | sed 's/^/  - /'
           fi
+          node scripts/check-changelog-fold.mjs "$before" "$after" "$content_changed"
 
       # A federated entry pins a tag so its skill can never drift from the CLI
       # it describes (OPAG-37) - but a pin only does that if the tagged
