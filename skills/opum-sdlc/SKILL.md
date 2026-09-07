@@ -129,6 +129,13 @@ character blocks merges permanently with no useful error.
 
 ## 5. Deliver - dev integrates, main releases
 
+**Tracker-only and docs-only chores take this same path.** A `.quest`-only or
+docs-only change is still a change: branch it, open a PR, squash it into `dev`
+like any other. A pre-approval - from an orchestrator, or from standing
+instructions - removes the sign-off wait, never the PR itself. A direct commit
+to `dev` is invisible to review and to `delete_branch_on_merge` hygiene; it is
+a defect to record on the task, not a shortcut to repeat.
+
 **Into `dev`:** squash merge. One commit per task keeps `dev`'s history a list of
 delivered work rather than a transcript of how it was written. The head branch
 deletes itself, so never delete a merged branch by hand.
