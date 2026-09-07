@@ -175,6 +175,33 @@ if pending:
   [ -n "${question}" ] && kind="human_decision"
 fi
 
+# agent_needs_input, requalified (OMARK-10/OPAG-62). Observed 2026-08-31
+# through 2026-09-07 across 305 logged notifications, 64 of them
+# agent_needs_input: every single one carried a message of the shape "<name>
+# needs your input: ..." where <name> was never this worker's own repo - 54
+# named the orchestrator ("opum-agent"), the rest another named session
+# ("opum-handoff ...", "exit command handling"). Something upstream of this
+# hook relays a DIFFERENT session's own need-input state into this worker's
+# Notification hook, misattributed as if this worker were the one blocked -
+# the same shape as idle_prompt's false positive, but with no discriminator
+# at all before this. Zero of 64 logged fires named this worker's own repo,
+# so that is the check: if the message names a session other than this one,
+# it did not originate here and must not be relayed as this worker's own
+# question. A message that does not match the pattern falls through
+# unchanged - still STUCK, still erring toward a spurious alert over a
+# missed one, per this hook's existing policy for genuinely unrecognized
+# shapes.
+if [ "${kind}" = "agent_needs_input" ]; then
+  needs_input_name="$(printf '%s' "${msg}" | python3 -c '
+import re, sys
+m = re.match(r"\s*([^:]{1,80}?) needs your input:", sys.stdin.read())
+print(m.group(1).strip() if m else "")
+' 2>/dev/null || true)"
+  if [ -n "${needs_input_name}" ] && [ "${needs_input_name}" != "${repo}" ]; then
+    kind="foreign_needs_input"
+  fi
+fi
+
 # TWO ROUTES, keyed on urgency rather than on event type. Both kinds are worth
 # recording; only one is worth interrupting anyone over.
 #
@@ -195,7 +222,7 @@ fi
 # unpublished, and a silent drop is the exact failure this exists to prevent.
 # Better a spurious interruption than a missed one.
 case "${kind}" in
-  idle_prompt) exit 0 ;;
+  idle_prompt|foreign_needs_input) exit 0 ;;
   human_decision|permission_prompt|agent_needs_input|elicitation_dialog|elicitation_url_dialog|unknown) ;;
   *) exit 0 ;;
 esac
