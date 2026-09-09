@@ -20,8 +20,9 @@ One live session per repository. `opum-agent` is the orchestrator.
 | `lore-cli` | lore documentation CLI |
 | `quest-cli` | quest tracker CLI |
 | `opum-cli-e2e` | lore + quest end-to-end qualification harness |
-| `lore-web` | loregraph.dev — Lore's public site and private-beta onboarding web app |
+| `lore-web` | loregraph.dev — Lore's public site and hosted-beta waitlist (no working onboarding app) |
 | `quest-web` | questgraph.dev — Quest's public project site, one static page |
+| `opum-web` | opum.ai — Opum's public umbrella and commercial site |
 | `opum-marketplace` | Claude Code plugin marketplace — ships opum-workflow and federates opum-lore and opum-quest |
 
 Sessions message each other directly over Claude cross-session messaging and

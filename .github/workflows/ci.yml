@@ -252,7 +252,7 @@ jobs:
             evals/results/
           if-no-files-found: warn
 
-  # The fleet operating block is byte-identical across all eight repos by design.
+  # The fleet operating block is byte-identical across all nine repos by design.
   # This asserts THIS repo's copy against a pinned digest rather than diffing it
   # against a local canonical document, because that document lives in opum-doc
   # -- the cross-repo platform doc store. Both repos are private, so a cross-repo
@@ -260,13 +260,13 @@ jobs:
   # needs no auth and catches drift.
   #
   # CHANGING THE BLOCK IS A FLEET-WIDE CHANGE: update the canonical document in
-  # opum-doc, propagate to all eight CLAUDE.md files, then update this pinned
-  # digest in all eight CI workflows. That is deliberately heavy.
+  # opum-doc, propagate to all nine CLAUDE.md files, then update this pinned
+  # digest in all nine CI workflows. That is deliberately heavy.
   operating-block:
     name: check · operating block digest
     runs-on: ubuntu-latest
     env:
-      EXPECTED_DIGEST: 5e543eb84584c382
+      EXPECTED_DIGEST: 4cbdcba163ba318f
     steps:
       - uses: actions/checkout@v4
       - name: CLAUDE.md operating block matches the fleet digest
@@ -279,6 +279,6 @@ jobs:
           echo "expected $EXPECTED_DIGEST"
           echo "actual   $actual"
           if [ "$actual" != "$EXPECTED_DIGEST" ]; then
-            echo "::error::operating block has drifted from the fleet digest. It is byte-identical across all eight repos by design; a local edit here is a defect. To change it deliberately: update the canonical doc in opum-doc, propagate to all eight CLAUDE.md files, then update EXPECTED_DIGEST in all eight workflows."
+            echo "::error::operating block has drifted from the fleet digest. It is byte-identical across all nine repos by design; a local edit here is a defect. To change it deliberately: update the canonical doc in opum-doc, propagate to all nine CLAUDE.md files, then update EXPECTED_DIGEST in all nine workflows."
             exit 1
           fi
