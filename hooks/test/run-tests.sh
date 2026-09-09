@@ -89,11 +89,49 @@ cleanup
 echo "AC1 - tracker is written before the cursor, and every failure path exits 0"
 sandbox
 export QUEST_EDIT_LOG="$SB/edits.log"
+echo "dirty" > "$SB/uncommitted.txt"   # something at risk, or OMARK-23's guard withholds the note
 OPUM_HOOK_ACTOR=test-actor OPUM_HOOK_ACCOUNTABLE_HUMAN=test-human sh "$HOOKS/pre-compact.sh" >/dev/null 2>&1
 grep -q 'task edit' "$SB/edits.log" 2>/dev/null && ok "tracker note written when actor is declared" || bad "no tracker write"
 grep -q 'actor-kind delegated-agent' "$SB/edits.log" 2>/dev/null && ok "declares delegated-agent, never human" || bad "wrong actor-kind"
 unset QUEST_EDIT_LOG
 cleanup
+
+echo "OMARK-23 - a clean tree with nothing unpushed withholds the tracker note (the self-sustaining PR loop's source)"
+sandbox
+# sandbox() writes bin/quest AFTER its own seed commit, so the baseline
+# sandbox always has one untracked file. Commit it so this test starts from a
+# genuinely clean tree - the state that, before this fix, still produced a
+# note whose own write was the tree's only reason to need a commit at all.
+git -C "$SB" add -A >/dev/null 2>&1; git -C "$SB" commit -q -m "commit sandbox stub" 2>/dev/null
+export QUEST_EDIT_LOG="$SB/edits.log"
+OPUM_HOOK_ACTOR=test-actor OPUM_HOOK_ACCOUNTABLE_HUMAN=test-human sh "$HOOKS/pre-compact.sh" >/dev/null 2>&1
+[ ! -s "$SB/edits.log" ] && ok "no tracker note written against a clean, fully-pushed tree" || bad "note written with nothing to protect: $(cat "$SB/edits.log" 2>/dev/null)"
+CUR4="$SB/.claude/handovers/cursor.md"
+[ -f "$CUR4" ] && ok "cursor still written unconditionally" || bad "cursor missing - the guard must not touch step 2"
+grep -q 'OPRB-7' "$CUR4" 2>/dev/null && ok "cursor still names the live task despite the withheld note" || bad "cursor lost task info"
+unset QUEST_EDIT_LOG
+cleanup
+
+echo "OMARK-23 - an unpushed commit alone (clean working tree) still earns the tracker note"
+sandbox
+# bin/quest is untracked until committed (see the clean-tree test above) -
+# commit it first so DIRTY genuinely reaches 0 before HEAD is pushed, then add
+# an unpushed commit on top. A real upstream lets @{u}..HEAD resolve, so
+# UNPUSHED can be non-zero while DIRTY stays 0 - the one signal the DIRTY-only
+# guard above cannot exercise, and the case that proves the guard checks both
+# rather than just collapsing to "tree is clean".
+git -C "$SB" add -A >/dev/null 2>&1; git -C "$SB" commit -q -m "commit sandbox stub" 2>/dev/null
+REMOTE=$(mktemp -d); git init -q --bare "$REMOTE"
+git -C "$SB" remote add origin "$REMOTE"
+git -C "$SB" push -q -u origin HEAD:refs/heads/main
+git -C "$SB" commit -q --allow-empty -m "unpushed work"
+export QUEST_EDIT_LOG="$SB/edits.log"
+OPUM_HOOK_ACTOR=test-actor OPUM_HOOK_ACCOUNTABLE_HUMAN=test-human sh "$HOOKS/pre-compact.sh" >/dev/null 2>&1
+grep -q 'task edit' "$SB/edits.log" 2>/dev/null && ok "note written for an unpushed commit even though the working tree is clean" || bad "no tracker write despite unpushed work: $(cat "$SB/edits.log" 2>/dev/null)"
+grep -q '1 unpushed commit' "$SB/edits.log" 2>/dev/null && ok "note names the unpushed count" || bad "unpushed count missing from note"
+unset QUEST_EDIT_LOG
+cleanup
+rm -rf "$REMOTE"
 
 echo "OMARK-4 - opum_active_task must return every In Progress id, not just the last"
 sandbox

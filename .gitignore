@@ -1,6 +1,13 @@
 # Machine- and user-specific Claude Code settings never enter public history.
 .claude/settings.local.json
 
+# Session restart cursors (opum-workflow's SessionEnd/PreCompact hooks) - never
+# authoritative, discarded on read. Every other fleet repository already
+# ignores this path (hooks/README.md); this repo joined as the eighth and
+# missed it, which let a plain cursor rewrite count as an uncommitted file
+# here even after OMARK-23 stopped the tracker note from doing the same.
+.claude/handovers/
+
 # Eval run artifacts.
 **/evals/results/
 *-workspace/

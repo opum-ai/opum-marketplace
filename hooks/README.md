@@ -62,7 +62,7 @@ cursor. The cursor is a file in a working tree that may be discarded on a
 machine that may be rebuilt; the tracker is committed and survives both. If only
 one write lands it must be the durable one.
 
-Two guards:
+Three guards:
 
 - It writes only when **exactly one** task is In Progress. Guessing which of
   several a session was on would put a false record somewhere durable, and a
@@ -72,14 +72,31 @@ Two guards:
   set. Quest writes require an explicit actor declaration; a hook that guessed
   one would be forging provenance. Unset means no tracker write, and the cursor
   still gets written.
+- It writes only when the repository has an uncommitted file or an unpushed
+  commit — something the note would actually protect. A clean, fully-pushed
+  tree has nothing at risk that live git and the tracker don't already show,
+  and `.quest/` is committed (unlike the cursor, which the fleet gitignores),
+  so writing the note anyway makes the note's own write the tree's only reason
+  to need a commit. That is OMARK-23: SessionEnd fires, writes the note,
+  dirties `.quest/`; landing it under `opum-sdlc` needs a branch and a PR;
+  landing the PR ends a session; the hook fires again. Five straight
+  `lore-web` PRs were nothing else, three of them landing on a task the ending
+  session hadn't touched — it was just the sole one left In Progress. This
+  guard never reaches the cursor step, which stays unconditional and already
+  carries the full live-state snapshot: a read-and-reason session that edits
+  nothing still gets a complete cursor, just no redundant tracker duplicate.
 
 The actor kind is always `delegated-agent`. A session is never `human`.
 
 ## Where the cursor lives
 
 `.claude/handovers/cursor.md` — **plural**, deliberately. Every fleet repository
-already gitignores that path; none ignores the singular form. A cursor written to
+gitignores that path; none ignores the singular form. A cursor written to
 an untracked path is session state waiting to be swept into a commit.
+`opum-marketplace` itself missed this when it joined as the eighth repository —
+found and closed by OMARK-23's investigation, which is also why that repo, and
+only that repo, could see the cursor rewrite (not just the tracker note)
+contribute to the self-sustaining PR loop described above.
 
 ## Configuration
 
@@ -105,5 +122,5 @@ gone quiet fleet-wide. There is a test for it.
 sh hooks/test/run-tests.sh
 ```
 
-31 assertions, no network and no real tracker — `quest` is stubbed on `PATH`.
+46 assertions, no network and no real tracker — `quest` is stubbed on `PATH`.
 Run in CI on every push.
