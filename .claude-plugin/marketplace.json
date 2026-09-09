@@ -13,7 +13,11 @@
       "author": {
         "name": "Opum"
       },
-      "source": "./",
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/opum-marketplace",
+        "ref": "main"
+      },
       "category": "workflow",
       "homepage": "https://github.com/opum-ai/opum-marketplace"
     },
