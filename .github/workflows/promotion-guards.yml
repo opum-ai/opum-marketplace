@@ -1,0 +1,64 @@
+name: promotion guards
+
+# OMARK-29, replicating opum-agent's own shape (OPAG-64 wave 2) and opum-doc's
+# ODOC-73/ODOC-155 (see opum-doc docs/runbooks/promote-dev-to-main.md,
+# Guardrails). Kept in its own workflow so ci.yml's trigger set (dev on push
+# and PR, main on push and PR) stays as designed: these two jobs need PRs INTO
+# main and pushes TO main specifically, and ODOC-155 found that folding them
+# into a general CI workflow behind an `if:` condition is a latent defect --
+# the push-side guard silently never fired through several real promotions
+# because ci.yml's `if:` never evaluated true for the way the push actually
+# happened. A dedicated trigger set is what makes the push-side job fire for
+# real, independent of whatever the main CI workflow's own trigger looks like.
+#
+# Neither job is a required status check, and that is deliberate. GitHub gates
+# a direct push by the pushed SHA's own prior check history, and a job that
+# only runs for PRs into main or pushes to main never reports for dev's tip in
+# any other context, so wiring either into main's required checks would make
+# the one correct promotion path, git push origin dev:main, permanently
+# unpushable. opum-doc verified that against a scratch ruleset before ruling
+# it out; do the same before ever trying to require either of these for real.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  promotion-is-manual:
+    # Always fails on a PR into main, on purpose: the merge button is the wrong
+    # action here (it staples a commit onto main that dev never had), and a red
+    # X on exactly that button is the detection. The orchestrator's promotion
+    # gate reads REQUIRED checks on the SHA, so this job's failure does not
+    # block the fast-forward push it exists to steer people toward.
+    name: dev-to-main promotion is a manual fast-forward push
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: do not merge this PR with the button
+        run: |
+          echo "::error::Do not merge this PR with the GitHub merge button; it would create a commit main never had on dev and break the fast-forward promotion model (opum-doc docs/runbooks/promote-dev-to-main.md). This check fails on purpose and is not required. Once the required checks are green on this exact SHA, land it with: git push origin dev:main"
+          exit 1
+
+  main-is-fast-forward-of-dev:
+    # Defense in depth: any commit that reached main by git push origin
+    # dev:main is one dev already held; a button merge creates a SHA dev never
+    # had.
+    name: main landed via fast-forward from dev
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: main's new HEAD must be a commit dev already held
+        run: |
+          set -euo pipefail
+          git fetch origin dev
+          if git merge-base --is-ancestor HEAD origin/dev; then
+            echo "main's HEAD ($(git rev-parse --short HEAD)) is reachable from dev: genuine fast-forward."
+          else
+            echo "::error::main's new HEAD ($(git rev-parse --short HEAD)) is not a commit dev ever held. This is not a fast-forward promotion. Do not push over it until the anomaly is understood; see opum-doc docs/runbooks/promote-dev-to-main.md, Rollback."
+            exit 1
+          fi
