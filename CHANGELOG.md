@@ -9,6 +9,20 @@ at once. See `scripts/check-changelog-fold.mjs`.
 
 ## Unreleased
 
+- Fixed `hooks/flush-state.sh` (SessionEnd/PreCompact) writing a durable
+  tracker note on every firing regardless of whether there was anything to
+  protect, which under `opum-sdlc` forced a branch and a PR to land the note
+  itself, ending a session and firing the hook again — a self-sustaining
+  loop observed as five straight boilerplate-only PRs in `lore-web` and
+  diluting `LWEB-55`'s implementation notes to 3 substantive out of 12. The
+  note is now withheld when the repository has nothing uncommitted and
+  nothing unpushed; the unconditional cursor write is unaffected (OMARK-23).
+  Version deliberately not bumped: OMARK-21's post-0.4.0 observation week
+  (2026-09-08 to 2026-09-15) is watching the currently-deployed 0.4.0 build,
+  and releasing a new version mid-week would force another fleet restart and
+  reset that observation's baseline — a call for the orchestrator, not this
+  fix, to make.
+
 ## 0.4.0
 
 - Added four subagent definitions (`implementer`, `reviewer`, `verifier`,

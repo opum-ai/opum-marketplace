@@ -179,6 +179,18 @@ jobs:
           fi
           node scripts/check-federated-pins.mjs
 
+  # Free, deterministic, no network: sh only, no real tracker (quest is
+  # stubbed on PATH by the suite itself). hooks/README.md has claimed this
+  # runs in CI on every push since these hooks shipped; nothing actually
+  # invoked it until OMARK-23, whose flush-state.sh fix this job exists to
+  # hold in place.
+  hooks:
+    name: check · hook tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh hooks/test/run-tests.sh
+
   # The PLAN.md 5.3 ship gate. MANUAL DISPATCH ONLY - it is deliberately not
   # wired to pull_request.
   #
