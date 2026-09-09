@@ -252,16 +252,18 @@ jobs:
             evals/results/
           if-no-files-found: warn
 
-  # The fleet operating block is byte-identical across all nine repos by design.
-  # This asserts THIS repo's copy against a pinned digest rather than diffing it
-  # against a local canonical document, because that document lives in opum-doc
-  # -- the cross-repo platform doc store. Both repos are private, so a cross-repo
-  # fetch in CI would need more than the default GITHUB_TOKEN; a pinned digest
-  # needs no auth and catches drift.
+  # The fleet operating block is byte-identical across the fleet's repos by
+  # design. This asserts THIS repo's copy against a pinned digest rather than
+  # diffing it against a local canonical document, because that document lives
+  # in opum-doc -- the cross-repo platform doc store. Both repos are private, so
+  # a cross-repo fetch in CI would need more than the default GITHUB_TOKEN; a
+  # pinned digest needs no auth and catches drift.
   #
   # CHANGING THE BLOCK IS A FLEET-WIDE CHANGE: update the canonical document in
-  # opum-doc, propagate to all nine CLAUDE.md files, then update this pinned
-  # digest in all nine CI workflows. That is deliberately heavy.
+  # opum-doc, propagate to every fleet CLAUDE.md, then update this pinned digest
+  # in every fleet workflow. That is deliberately heavy. (A repo count here goes
+  # stale the moment a repo joins or leaves the fleet -- it already did once,
+  # OMARK-26/OMARK-27 -- so this names none.)
   operating-block:
     name: check · operating block digest
     runs-on: ubuntu-latest
@@ -279,6 +281,6 @@ jobs:
           echo "expected $EXPECTED_DIGEST"
           echo "actual   $actual"
           if [ "$actual" != "$EXPECTED_DIGEST" ]; then
-            echo "::error::operating block has drifted from the fleet digest. It is byte-identical across all nine repos by design; a local edit here is a defect. To change it deliberately: update the canonical doc in opum-doc, propagate to all nine CLAUDE.md files, then update EXPECTED_DIGEST in all nine workflows."
+            echo "::error::operating block has drifted from the fleet digest. It is byte-identical across the fleet's repos by design; a local edit here is a defect. To change it deliberately: update the canonical doc in opum-doc, propagate to every fleet CLAUDE.md, then update EXPECTED_DIGEST in every fleet workflow."
             exit 1
           fi
