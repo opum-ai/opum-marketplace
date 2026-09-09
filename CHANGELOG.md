@@ -22,6 +22,9 @@ at once. See `scripts/check-changelog-fold.mjs`.
   and releasing a new version mid-week would force another fleet restart and
   reset that observation's baseline — a call for the orchestrator, not this
   fix, to make.
+- Rebranded `plugin.json`'s `author.name` from `Opum` to `Opum AI`, per user
+  ruling (OMARK-37). Identifiers (`name`, the marketplace slug) and
+  description prose are unaffected — this is a display-field change only.
 
 ## 0.4.0
 

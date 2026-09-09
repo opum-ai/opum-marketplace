@@ -3,7 +3,7 @@
   "name": "opum",
   "description": "Opum fleet plugins: the shared SDLC, handover, and engineering skills the Opum repositories run on, plus federated entries for the lore and quest CLI skills.",
   "owner": {
-    "name": "Opum",
+    "name": "Opum AI",
     "url": "https://github.com/opum-ai"
   },
   "plugins": [
@@ -11,7 +11,7 @@
       "name": "opum-workflow",
       "description": "The Opum fleet's shared workflow: the SDLC skill that governs task-before-branch delivery, session handover, and the engineering and documentation skills the fleet reviews against. Use when working in an Opum repository, or as a worked example of a Quest-tracked, Lore-documented delivery loop.",
       "author": {
-        "name": "Opum"
+        "name": "Opum AI"
       },
       "source": {
         "source": "github",
@@ -25,7 +25,7 @@
       "name": "opum-lore",
       "description": "Drive the lore CLI: author, retrieve, and maintain OKF documentation bundles, including explicit multi-repository workspaces. Federated: this entry pins the lore-cli release tag, so the skill is cut from the same tag as the CLI it describes and cannot drift from it.",
       "author": {
-        "name": "Opum"
+        "name": "Opum AI"
       },
       "source": {
         "source": "github",
@@ -39,7 +39,7 @@
       "name": "opum-quest",
       "description": "Drive the quest CLI: file, plan, record and complete tracker work in a Quest workspace. Federated: pinned to the quest-cli release tag so the skill cannot drift from the CLI it describes.",
       "author": {
-        "name": "Opum"
+        "name": "Opum AI"
       },
       "source": {
         "source": "github",
