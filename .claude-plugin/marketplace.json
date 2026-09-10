@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "opum",
-  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes.",
+  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, plus original Claude Code output styles.",
   "owner": {
     "name": "Opum AI",
     "url": "https://github.com/opum-ai"
@@ -20,6 +20,20 @@
       },
       "category": "documentation",
       "homepage": "https://github.com/opum-ai/lore-cli"
+    },
+    {
+      "name": "opum-output-styles",
+      "description": "Original Claude Code output styles from Opum AI. Ships \"Show Your Checks\": a reporting style that marks every claim as verified, inferred, or unchecked, instead of presenting all three with the same confidence.",
+      "author": {
+        "name": "Opum AI"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/opum-output-styles",
+        "ref": "main"
+      },
+      "category": "productivity",
+      "homepage": "https://github.com/opum-ai/opum-output-styles"
     },
     {
       "name": "opum-quest",
