@@ -1,32 +1,31 @@
 # Opum Marketplace
 
-A Claude Code plugin marketplace for the Opum fleet, and the home of the
-`opum-workflow` plugin.
+Opum's public Claude Code plugin index: federated entries for the `lore` and
+`quest` CLI skills.
 
 ```
 /plugin marketplace add opum-ai/opum-marketplace
-/plugin install opum-workflow@opum
+/plugin install opum-lore@opum
+/plugin install opum-quest@opum
 ```
 
 ## What is here
 
 | Plugin | Lives in | Ships |
 |---|---|---|
-| `opum-workflow` | this repository | the fleet's SDLC, handover, engineering and documentation skills, plus the hooks and agents that carry a session's context across a restart |
 | `opum-lore` | `opum-ai/lore-cli` | the `lore` skill, cut by the same tag as the CLI it describes |
 | `opum-quest` | `opum-ai/quest-cli` | the `quest` skill, cut by the same tag as the CLI it describes |
 
 ## Why the index is federated
 
 A marketplace's `marketplace.json` can point each plugin at a different
-repository, so this repository is an **index** and each plugin lives with the
-thing it describes.
+repository, so this repository is an **index**, not a home for plugin content.
+Every entry here lives with the thing it describes.
 
 That is not tidiness. A skill that documents a CLI has to be cut by the same tag
 as the CLI, or it drifts into describing a version nobody has installed. Keeping
 the `lore` skill inside `lore-cli` makes that structurally impossible rather
-than merely discouraged. `opum-workflow` sits here because nothing else public
-owns it.
+than merely discouraged.
 
 A federated entry is added **in the same change that creates the plugin it names**.
 An index that lists a plugin which does not resolve is broken for everyone who
@@ -34,35 +33,21 @@ adds the marketplace, so a federated entry is absent from `marketplace.json`
 until its plugin exists at the pinned tag. `opum-lore` and `opum-quest` both
 resolve now.
 
-## What `opum-workflow` ships
+## Contributing
 
-### Skills
+This repository owns no plugin content directly — there is nothing to author
+or eval here. To change what ships:
 
-- **`opum-sdlc`** - the development lifecycle: a Quest task before a branch,
-  `<type>/<TASK-ID>-<slug>` naming, a two-day and roughly 400-line ceiling,
-  squash into `dev`, fast-forward `dev` to `main`. Its references carry the
-  promotion mechanics and the Quest write contract.
+- **A skill's own behaviour** is a change in `lore-cli` or `quest-cli`, not
+  here.
+- **The index itself** — adding a plugin, moving a pin forward, correcting a
+  description — is a change to `.claude-plugin/marketplace.json`. `check ·
+  manifests` validates every entry's shape and, on any PR touching the file,
+  fetches each pinned tag live to confirm its own `plugin.json` actually
+  declares the version being pinned.
 
-More skills land as they pass their eval suites; a skill is not shipped by
-being present in `skills/`.
-
-## Contributing constraints
-
-**This repository is public.** Nothing in it may carry an absolute machine path,
-a username, an internal hostname, or a credential. Hooks and scripts resolve
-paths from `${CLAUDE_PLUGIN_ROOT}` and `$CLAUDE_PROJECT_DIR` only. Machine- and
-user-specific settings belong in a consumer's gitignored
-`.claude/settings.local.json`, never here.
-
-Every skill is authored through the official `skill-creator` plugin, checked
-with `/skill-doctor`, and ships only on a passing `claude plugin eval` suite.
-
-Validate any change before opening a PR:
-
-```sh
-claude plugin validate .
-claude plugin eval .
-```
+**This repository is public.** Nothing in it may carry an absolute machine
+path, a username, an internal hostname, or a credential.
 
 ## Licence
 
