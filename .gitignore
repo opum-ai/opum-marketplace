@@ -1,5 +1,12 @@
 # Machine- and user-specific Claude Code settings never enter public history.
+# .claude/settings.json is included here too, deliberately: this repository
+# is public and has nothing safe to share in a tracked settings file (its
+# only past content was OPUM_HOOK_ACTOR/OPUM_HOOK_ACCOUNTABLE_HUMAN, a real
+# name, OMARK-41) - ignoring the plain path as well as the .local one means
+# neither can silently regain committed content later.
+.claude/settings.json
 .claude/settings.local.json
+CLAUDE.local.md
 
 # Session restart cursors (opum-workflow's SessionEnd/PreCompact hooks) - never
 # authoritative, discarded on read. Every other fleet repository already
