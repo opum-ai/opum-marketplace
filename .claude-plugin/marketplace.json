@@ -1,26 +1,12 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "opum",
-  "description": "Opum fleet plugins: the shared SDLC, handover, and engineering skills the Opum repositories run on, plus federated entries for the lore and quest CLI skills.",
+  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes.",
   "owner": {
     "name": "Opum AI",
     "url": "https://github.com/opum-ai"
   },
   "plugins": [
-    {
-      "name": "opum-workflow",
-      "description": "The Opum fleet's shared workflow: the SDLC skill that governs task-before-branch delivery, session handover, and the engineering and documentation skills the fleet reviews against. Use when working in an Opum repository, or as a worked example of a Quest-tracked, Lore-documented delivery loop.",
-      "author": {
-        "name": "Opum AI"
-      },
-      "source": {
-        "source": "github",
-        "repo": "opum-ai/opum-marketplace",
-        "ref": "main"
-      },
-      "category": "workflow",
-      "homepage": "https://github.com/opum-ai/opum-marketplace"
-    },
     {
       "name": "opum-lore",
       "description": "Drive the lore CLI: author, retrieve, and maintain OKF documentation bundles, including explicit multi-repository workspaces. Federated: this entry pins the lore-cli release tag, so the skill is cut from the same tag as the CLI it describes and cannot drift from it.",
