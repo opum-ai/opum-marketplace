@@ -1,0 +1,32 @@
+{
+  "$comment": [
+    "Resolved content baselines for the federated entries in .claude-plugin/marketplace.json.",
+    "Deliberately NOT stored in marketplace.json: that file is consumed by Claude Code",
+    "against its own marketplace schema, and must not carry keys the plugin loader does",
+    "not expect. This sidecar is read only by scripts/check-federated-content.mjs.",
+    "",
+    "Why it exists: a federated entry pins a tag by NAME, and a tag name is mutable.",
+    "Re-pointing it at different content is silent - every consumer follows, and the",
+    "existing pin check still passes because it only asks whether the tag resolves and",
+    "declares the matching version. lore-cli and quest-cli both had v0.6.0 deleted and",
+    "recreated on 2026-09-10/11 (OMARK-43); the skill content happened to be unchanged,",
+    "but nothing in CI could have told us if it had not been.",
+    "",
+    "To update: re-resolve the chain yourself (tag ref -> tag object -> commit -> root",
+    "tree -> skills subtree), confirm the content is what you intend to ship, and record",
+    "the new SHA here in the same change that moves the pin. Updating this file is the",
+    "act of saying 'I verified this content', so do not update it to make CI go green."
+  ],
+  "opum-lore": {
+    "ref": "v0.6.0",
+    "trees": { "skills": "24277e9a94d6cc9b5a8c7fa12fa32c4f15eb4c0f" },
+    "verifiedAt": "2026-09-11",
+    "note": "Re-verified after the lore-cli history reset (OMARK-43). Byte-identity established by re-hashing the pre-deletion tarball's skills/ locally with git write-tree, not by comparing recorded SHAs."
+  },
+  "opum-quest": {
+    "ref": "v0.6.0",
+    "trees": { "skills": "633c776b3c40ae54ffd1c8cc6fbd7329d03bdd40" },
+    "verifiedAt": "2026-09-11",
+    "note": "Re-verified after the quest-cli history reset (OMARK-43); skills subtree byte-identical to the pre-deletion baseline."
+  }
+}

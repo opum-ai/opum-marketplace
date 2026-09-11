@@ -8,6 +8,13 @@ on:
   pull_request:
   push:
     branches: [dev, main]
+  # A pinned tag can be deleted and recreated over different content without
+  # this repository changing at all (OMARK-43/OMARK-44), so a PR-only trigger
+  # cannot see a repoint. The daily run is the only thing that can. Scheduled
+  # runs execute on the default branch, dev.
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -65,6 +72,14 @@ jobs:
       - name: Federated pin checker has a passing regression test
         run: node scripts/test/check-federated-pins.test.mjs
 
+      # Same reasoning as the step above, for the content checker: proves it
+      # actually fails on a repointed tag, a stale baseline and a missing one,
+      # against a fake git-database API. Unconditional, so a regression in the
+      # checker is caught even on a push that touches neither the index nor the
+      # baselines.
+      - name: Federated content checker has a passing regression test
+        run: node scripts/test/check-federated-content.test.mjs
+
       # A federated entry pins a tag so its skill can never drift from the CLI
       # it describes (OPAG-37) - but a pin only does that if the tagged
       # release actually carries the content the pin implies. lore-cli's
@@ -98,3 +113,41 @@ jobs:
             exit 0
           fi
           node scripts/check-federated-pins.mjs
+
+      # The pin check above answers "does this tag resolve, and does its own
+      # plugin.json declare the version the pin names". Both stay true when a
+      # tag is deleted and recreated over DIFFERENT content, because the pin is
+      # by tag name and a tag name is mutable - every consumer silently follows
+      # the move. lore-cli and quest-cli both had v0.6.0 destroyed and recreated
+      # on 2026-09-10/11 (OMARK-43); the skill content happened to be unchanged,
+      # and nothing here could have told us if it had not been.
+      #
+      # So this resolves the chain (tag ref -> tag object -> commit -> root tree
+      # -> skills subtree) and compares against the SHAs recorded in
+      # scripts/federated-pin-baselines.json. A git tree SHA hashes the content
+      # beneath it, so an equal SHA is proof of byte-identity, not evidence of it.
+      #
+      # NOT gated on marketplace.json changing, unlike the version check: the
+      # whole failure mode is a tag moving while this repository stands still.
+      # On a PR it runs when the index or the baselines changed; on the daily
+      # schedule and on pushes to dev/main it always runs, which is what
+      # actually catches a repoint.
+      - name: Federated entries still resolve to the verified skill content
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            if ! merge_base=$(git merge-base "$base" HEAD); then
+              echo "::error::no merge base between $base and HEAD - cannot tell what this PR changed."
+              exit 1
+            fi
+            changed=$(git diff --name-only "$merge_base" HEAD -- .claude-plugin/marketplace.json scripts/federated-pin-baselines.json)
+            if [ -z "$changed" ]; then
+              echo "index and baselines both unchanged in this PR; the scheduled run covers repoints."
+              exit 0
+            fi
+          fi
+          node scripts/check-federated-content.mjs
