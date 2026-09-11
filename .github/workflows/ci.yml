@@ -151,3 +151,58 @@ jobs:
             fi
           fi
           node scripts/check-federated-content.mjs
+
+  # OPAG-79, fleet-wide. Two failure modes that both reach dev without any
+  # commit here to blame for them:
+  #
+  #   - A duplicated task identity (the same id in both .quest/tasks/ and
+  #     .quest/completed/) exits conflict/5 and makes EVERY tracker read in the
+  #     repository fail. That reached opum-web's dev once, unnoticed, because
+  #     nothing asserted it.
+  #   - Managed skill/instruction drift exits 6. It drifts on its own whenever
+  #     the CLI moves underneath the committed copy - OMARK-45 here was exactly
+  #     that: quest 0.6.0 added GEMINI.md to the skill file's target list, so a
+  #     file nobody had touched became stale.
+  #
+  # Shape follows opum-web's reference job, which authored and negative-tested
+  # it. Adapted where this repository genuinely differs rather than copied
+  # blind - see the node-version comment below.
+  tracker:
+    name: Tracker integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # A literal version, not node-version-file: this repository owns no JS
+      # project, so it has neither .nvmrc nor package.json to read one from.
+      # 24 matches the toolchain the fleet develops against.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Derived from CLAUDE.md's own managed block, deliberately: not pinned
+      # (which would drift from the declared contract the moment either moved)
+      # and not floated to latest (which would let a CLI release fail this
+      # repository with no change here). The file that declares the version is
+      # the file the check honours, so the two cannot disagree. A missing line
+      # fails loudly rather than defaulting to something plausible.
+      - name: Resolve the Quest version CLAUDE.md declares
+        id: quest
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*Quest CLI \([0-9][0-9.]*\).*/\1/p' CLAUDE.md | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error file=CLAUDE.md::No 'Quest CLI <version>' line found in the managed block. Tracker integrity cannot be checked against an undeclared version."
+            exit 1
+          fi
+          echo "Declared Quest version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - run: npm install -g "@opum-ai/quest@${{ steps.quest.outputs.version }}"
+
+      # Two separate steps on purpose: a combined one would report "tracker
+      # integrity failed" without saying which of the two very different
+      # problems it hit.
+      - name: Tracker reads cleanly
+        run: quest task list --json
+
+      - name: Managed instructions are current
+        run: quest agents --check --require-installed --target claude
