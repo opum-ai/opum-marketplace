@@ -15,7 +15,16 @@
     "To update: re-resolve the chain yourself (tag ref -> tag object -> commit -> root",
     "tree -> skills subtree), confirm the content is what you intend to ship, and record",
     "the new SHA here in the same change that moves the pin. Updating this file is the",
-    "act of saying 'I verified this content', so do not update it to make CI go green."
+    "act of saying 'I verified this content', so do not update it to make CI go green.",
+    "",
+    "Release handshake, agreed with the lore-cli session and tracked there as LCLI-469:",
+    "lore-cli messages this repository at tag-cut time with the tag name, the tag object",
+    "SHA, the commit it peels to, and the resolved skills/ tree SHA, so a new release",
+    "arrives with its baseline rather than as a red check here. The same is expected of",
+    "quest-cli. Do not take those SHAs on trust - they are a head start, not a",
+    "verification; re-resolve them here before recording, which is the whole point of",
+    "this file. If a pin bump ever lands without its baseline moving, the checker fails",
+    "on purpose rather than silently checking the wrong tag."
   ],
   "opum-lore": {
     "ref": "v0.6.0",
