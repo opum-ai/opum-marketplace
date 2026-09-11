@@ -25,6 +25,17 @@ the one required check on `main`: it validates every `marketplace.json` entry's
 shape, and on any PR touching the file, fetches each pinned tag live to
 confirm its own `plugin.json` actually declares the version being pinned.
 
+It also checks that a pinned tag still carries the skill content we verified,
+which the version check above cannot see: a pin names a tag, and a tag name is
+mutable, so re-creating one over different content is silent and every
+consumer follows it (OMARK-43/OMARK-44). `scripts/federated-pin-baselines.json`
+records each pinned entry's resolved `skills/` subtree SHA and
+`scripts/check-federated-content.mjs` re-resolves it. Bump a pin and you must
+re-verify and update that baseline in the same change, or the check fails on
+purpose rather than checking the wrong tag. Because a tag can move with no
+change here at all, that check also runs daily and on pushes to `dev`/`main`,
+not only on PRs.
+
 <!-- quest:agent-instructions:begin -->
 # Quest agent instructions
 
