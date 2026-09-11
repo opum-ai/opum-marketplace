@@ -10,7 +10,7 @@ drift from the release you have installed:
 
 - `quest instructions --list` — the workflow guides, one line each.
 - `quest instructions overview` — start here.
-- `quest instructions` — the versioned protocol block Quest manages in your instructions file (AGENTS.md or CLAUDE.md).
+- `quest instructions` — the versioned protocol block Quest manages in your instructions file (AGENTS.md, CLAUDE.md, or GEMINI.md).
 - `quest help [command]` — exact flags; `quest manifest --json` for the machine registry.
 
 Drive tracker state through `quest`, never by editing `.quest/` by hand.
