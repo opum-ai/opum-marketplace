@@ -27,10 +27,10 @@
     "on purpose rather than silently checking the wrong tag."
   ],
   "opum-lore": {
-    "ref": "v0.6.0",
+    "ref": "v0.6.1",
     "trees": { "skills": "24277e9a94d6cc9b5a8c7fa12fa32c4f15eb4c0f" },
-    "verifiedAt": "2026-09-11",
-    "note": "Re-verified after the lore-cli history reset (OMARK-43). Byte-identity established by re-hashing the pre-deletion tarball's skills/ locally with git write-tree, not by comparing recorded SHAs."
+    "verifiedAt": "2026-09-13",
+    "note": "OMARK-47. lore-cli messaged the LCLI-469 handshake for v0.6.1 (tag commit 20a1d24beb11f50df9f3b4ad8cb0a6ecefb92878, skills/ tree 24277e9a...). Re-resolved independently via the GitHub API (ref -> tag object -> commit -> root tree -> skills subtree) rather than trusting the message; both hops matched. skills/ tree is byte-identical to the v0.6.0 baseline -- v0.6.1 changed nothing under skills/. plugin.json at the tag self-declares version 0.6.1. Note per LCLI-482: this release was published manually, without OIDC/SLSA provenance; that claim is about npm, not the git tag chain this baseline checks, so it does not affect this entry."
   },
   "opum-quest": {
     "ref": "v0.6.0",
