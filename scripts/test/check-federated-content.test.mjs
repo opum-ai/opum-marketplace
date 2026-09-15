@@ -10,6 +10,12 @@
 import { createServer } from 'node:http';
 import { checkMarketplace } from '../check-federated-content.mjs';
 
+// OMARK-57: checkMarketplace now returns { problems, checked/verified, skipped }
+// so the CLI can report what it actually measured. These cases assert the
+// problem list only; the report itself is covered by report.test.mjs.
+const problemsOf = async (...a) => (await checkMarketplace(...a)).problems;
+
+
 const SKILLS_VERIFIED = 'aaaa000000000000000000000000000000000000';
 const SKILLS_MOVED = 'bbbb111111111111111111111111111111111111';
 
@@ -70,7 +76,7 @@ const { port } = server.address();
 const api = `http://127.0.0.1:${port}`;
 
 try {
-  let problems = await checkMarketplace(
+  let problems = await problemsOf(
     { plugins: [entry('steady', 'opum-ai/steady-cli')] },
     baselineFor('steady'),
     api,
@@ -79,7 +85,7 @@ try {
     ? ok('a tag still resolving to the verified skills subtree passes')
     : bad(`steady pin flagged: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace(
+  problems = await problemsOf(
     { plugins: [entry('light', 'opum-ai/light-cli')] },
     baselineFor('light'),
     api,
@@ -89,7 +95,7 @@ try {
     : bad(`lightweight tag mishandled: ${JSON.stringify(problems)}`);
 
   // The whole point of the guard.
-  problems = await checkMarketplace(
+  problems = await problemsOf(
     { plugins: [entry('repointed', 'opum-ai/repointed-cli')] },
     baselineFor('repointed'),
     api,
@@ -101,7 +107,7 @@ try {
     ? ok('a tag repointed at different skill content is caught, naming both SHAs')
     : bad(`repointed tag not caught: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace(
+  problems = await problemsOf(
     { plugins: [entry('steady', 'opum-ai/steady-cli')] },
     baselineFor('steady', 'v0.9.0'),
     api,
@@ -110,12 +116,12 @@ try {
     ? ok('a pin bumped past its baseline fails instead of checking the wrong tag')
     : bad(`stale baseline not caught: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace({ plugins: [entry('steady', 'opum-ai/steady-cli')] }, {}, api);
+  problems = await problemsOf({ plugins: [entry('steady', 'opum-ai/steady-cli')] }, {}, api);
   problems.length === 1 && /records no verified content/.test(problems[0])
     ? ok('a v-pin with no baseline at all fails, so a new entry cannot skip the check')
     : bad(`missing baseline not caught: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace(
+  problems = await problemsOf(
     {
       plugins: [
         { name: 'branchpin', source: { source: 'github', repo: 'opum-ai/x', ref: 'main' } },
@@ -130,7 +136,7 @@ try {
     ? ok('branch pins, sha pins and local sources are out of scope, not fetched')
     : bad(`unexpected problems: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace(
+  problems = await problemsOf(
     { plugins: [entry('noskills', 'opum-ai/noskills-cli')] },
     baselineFor('noskills'),
     api,
@@ -139,7 +145,7 @@ try {
     ? ok('a tag that resolves but carries no skills/ fails, not passes silently')
     : bad(`missing skills dir: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace(
+  problems = await problemsOf(
     { plugins: [entry('gone', 'opum-ai/deleted-cli')] },
     baselineFor('gone'),
     api,

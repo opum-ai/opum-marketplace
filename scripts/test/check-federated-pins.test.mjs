@@ -7,6 +7,12 @@
 import { createServer } from 'node:http';
 import { checkMarketplace } from '../check-federated-pins.mjs';
 
+// OMARK-57: checkMarketplace now returns { problems, checked/verified, skipped }
+// so the CLI can report what it actually measured. These cases assert the
+// problem list only; the report itself is covered by report.test.mjs.
+const problemsOf = async (...a) => (await checkMarketplace(...a)).problems;
+
+
 const fixtures = {
   '/opum-ai/good-cli/v1.2.3/.claude-plugin/plugin.json': { version: '1.2.3' },
   // The real defect's shape: the tag is v0.4.3 but plugin.json never moved off 0.4.2.
@@ -41,21 +47,21 @@ const { port } = server.address();
 process.env.FEDERATED_PIN_RAW_BASE = `http://127.0.0.1:${port}`;
 
 try {
-  let problems = await checkMarketplace({
+  let problems = await problemsOf({
     plugins: [{ name: 'good', source: { source: 'github', repo: 'opum-ai/good-cli', ref: 'v1.2.3' } }],
   });
   problems.length === 0
     ? ok('a pin matching its plugin.json version passes')
     : bad(`good pin flagged: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace({
+  problems = await problemsOf({
     plugins: [{ name: 'stale', source: { source: 'github', repo: 'opum-ai/stale-cli', ref: 'v0.4.3' } }],
   });
   problems.length === 1 && /pinned to v0.4.3 but its plugin.json version is "0.4.2"/.test(problems[0])
     ? ok('a stale plugin.json (the real v0.4.3 defect) is caught')
     : bad(`stale pin not caught: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace({
+  problems = await problemsOf({
     plugins: [
       { name: 'local', source: './' },
       { name: 'shaonly', source: { source: 'github', repo: 'opum-ai/x', sha: 'deadbeef' } },
@@ -65,14 +71,14 @@ try {
     ? ok('local and sha-only sources are skipped, not fetched')
     : bad(`unexpected problems: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace({
+  problems = await problemsOf({
     plugins: [{ name: 'missing', source: { source: 'github', repo: 'opum-ai/nope', ref: 'v9.9.9' } }],
   });
   problems.length === 1 && /HTTP 404/.test(problems[0])
     ? ok('an unfetchable pin fails, not passes silently')
     : bad(`unfetchable pin: ${JSON.stringify(problems)}`);
 
-  problems = await checkMarketplace({
+  problems = await problemsOf({
     plugins: [{ name: 'broken', source: { source: 'github', repo: 'opum-ai/broken-cli', ref: 'v1.0.0' } }],
   });
   problems.length === 1 && /not valid JSON/.test(problems[0])
