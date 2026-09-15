@@ -43,22 +43,39 @@ jobs:
 
   main-is-fast-forward-of-dev:
     # Defense in depth: any commit that reached main by git push origin
-    # dev:main is one dev already held; a button merge creates a SHA dev never
-    # had.
+    # origin/dev:main is one dev already held; a button merge creates a SHA dev
+    # never had.
+    #
+    # OMARK-58. The assertion used to be written inline here and checked ONE
+    # property - that main's new HEAD is contained in dev - while the job was
+    # named for fast-forwardness, which is strictly stronger. It printed
+    # "genuine fast-forward" on a force-push REWIND, because it never read where
+    # main had been. Inline, it could have no tests by construction, and it only
+    # ran on a real push to main, so every green run meant only that the other
+    # jobs passed. The same shape was in eight repositories and five sessions
+    # found five independent defects in it in one evening.
+    #
+    # It is now a script with a proof suite that runs on every PR (see ci.yml),
+    # asserting three separate properties with three separate messages:
+    #   1. main moved FORWARD          - github.event.before is an ancestor of HEAD
+    #   2. main's HEAD CAME FROM dev   - HEAD is contained in origin/dev
+    #   3. main IS dev, not part of it - nothing left behind (warning only)
+    # Kept separate on purpose: adding 1 as a REPLACEMENT for 2 would have
+    # traded a known blind spot for a new one while looking like a fix.
     name: main landed via fast-forward from dev
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
+      # fetch-depth: 0 is load-bearing twice over: the shallow default has
+      # neither main's previous HEAD nor enough history for either ancestor
+      # test. If it is ever dropped, the script says so in those words rather
+      # than reporting a damaged branch - but nothing here MEASURES that it is
+      # present, which is why the wiring is only proven by a real promotion.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: main's new HEAD must be a commit dev already held
-        run: |
-          set -euo pipefail
-          git fetch origin dev
-          if git merge-base --is-ancestor HEAD origin/dev; then
-            echo "main's HEAD ($(git rev-parse --short HEAD)) is reachable from dev: genuine fast-forward."
-          else
-            echo "::error::main's new HEAD ($(git rev-parse --short HEAD)) is not a commit dev ever held. This is not a fast-forward promotion. Do not push over it until the anomaly is understood; see opum-doc docs/runbooks/promote-dev-to-main.md, Rollback."
-            exit 1
-          fi
+      - name: main must have moved forward, from dev, and completely
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          FORCED: ${{ github.event.forced }}
+        run: ./scripts/ci/assert-main-fast-forward.sh

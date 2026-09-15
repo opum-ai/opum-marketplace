@@ -92,6 +92,20 @@ jobs:
       - name: Checker reports say what was actually measured
         run: node scripts/test/report.test.mjs
 
+      # OMARK-58. Proves scripts/ci/assert-main-fast-forward.sh, which
+      # promotion-guards.yml runs on a push to main. That job cannot prove
+      # itself: it is gated on push-to-main, so it reports "skipping" on every
+      # PR, and before this the assertion was inline with no test surface at
+      # all. Free and deterministic - it builds scratch bare repositories and
+      # drives every branch, including a shallow clone.
+      #
+      # This proves the script's LOGIC, not the workflow WIRING (that
+      # BEFORE_SHA/FORCED are populated from the event context, and that
+      # fetch-depth: 0 is present). Those are a different object and stay
+      # unproven until the first real promotion after this lands.
+      - name: Promotion guard has a passing proof suite
+        run: bash scripts/test/assert-main-fast-forward.test.sh
+
       # A federated entry pins a tag so its skill can never drift from the CLI
       # it describes (OPAG-37) - but a pin only does that if the tagged
       # release actually carries the content the pin implies. lore-cli's
