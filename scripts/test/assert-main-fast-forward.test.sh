@@ -6,20 +6,46 @@
 # run was green and "green" only ever meant the other jobs passed. Five sessions
 # found five independent defects in the same copied shape in one evening.
 #
-# MUTATION READING, measured 2026-09-16 rather than reasoned. Under the BAD
-# fixture (--depth 1 --branch dev, which supplies origin/dev for free): drop
-# assertion 1 -> DIED, 6 red. Drop assertion 3 -> DIED, 5 red. Drop the fetch
-# refspec -> SURVIVED, 0 red. So a fixture defect does NOT produce 100% mutant
-# survival unless it disables the whole suite; it produces survival of exactly
-# the mutants whose property that fixture disabled - here 1 of 3. That is a
-# QUIET signal, not a loud one: among heterogeneous mutants it reads like "this
-# mutant was equivalent".
+# MUTATION READING, measured rather than reasoned. Under the BAD fixture
+# (--depth 1 --branch dev, which supplies origin/dev for free): drop assertion 1
+# -> DIED, 6 red. Drop assertion 3 -> DIED, 5 red. Drop the fetch refspec ->
+# SURVIVED, 0 red. So a fixture defect does NOT produce 100% mutant survival
+# unless it disables the whole suite; it produces survival of exactly the
+# mutants whose property that fixture disabled. That is a QUIET signal, not a
+# loud one: among heterogeneous mutants it reads like "this mutant was
+# equivalent".
 #
-# Two consequences for how a mutation run is gated. It must assert that EVERY
+# CORRECTED, OMARK-59, from opum-doc ODOC-211 running this suite verbatim. The
+# paragraph above then attributed the refspec survival TO that fixture, and was
+# wrong: the mutant survived the CORRECTED fixture too, 0 red, for an unrelated
+# reason. A fixture fix and a missing assertion are two defects, and the first
+# one being real is what made it a satisfying enough explanation to stop at. The
+# actual cause is that the guard's two missing-object sites word their shallow
+# diagnosis almost identically, so with the refspec dropped the EARLIER site
+# answers with a message the shallow row's positives all accept. Splitting the
+# second site - a fix delivered under this same task's predecessor - is what
+# made the first one untested. A fix that reroutes execution can silently move a
+# property out from under the assertion that covered it, so re-run the mutants
+# after the fix, not only before.
+#
+# Three consequences for how a mutation run is gated. It must assert that EVERY
 # mutant dies, named individually - a survival rate is the wrong summary when
-# one survivor is the whole finding. And the mutant set must actually touch the
+# one survivor is the whole finding. The mutant set must actually touch the
 # property in question: the refspec mutant was never run against the old
-# fixture, so no reading of that run, however careful, could have caught it.
+# fixture, so no reading of that run, however careful, could have caught it. And
+# a surviving mutant is not explained until the explanation is MEASURED - "the
+# fixture supplies it for free" was a plausible cause, held for a whole session,
+# and disproved in one run by someone who re-ran it instead of reading it.
+#
+# FULL MUTATION RUN as of OMARK-59, each mutant PREDICTED before it was run and
+# named individually. Clean tree: 17 rows, 0 failed. drop assertion 1 -> DIED, 5
+# red. drop assertion 2 -> DIED, 1. drop assertion 3 -> DIED, 3. drop the fetch
+# refspec -> DIED, 1 (the shallow row; it SURVIVED at 0 before this task).
+# restore 2>/dev/null on the fetch -> DIED, 1 (the verbatim row). Versions,
+# because two gates with identical exit codes can be measuring different things:
+# bash 3.2.57 macOS, git 2.55.0, lore 0.7.0, quest 0.7.1. CI runs bash 5.x,
+# which is a DIFFERENT object from the one measured here - the PR's own run is
+# what speaks for it.
 #
 # Cases come in MATCHED PAIRS where two conditions produce the same exit code
 # for different reasons (opum-web OWEB-8), and each asserts the ABSENCE of the
@@ -83,10 +109,15 @@ push() { git -C "$S/work" push -q ${2:-} origin "${1}:refs/heads/main"; }
 #   an exact =N (or want=green, which is exit 0 exactly) AND a +"..." positive.
 #   grep -n '!/' scripts/test/report.test.mjs   # the same shape in the other suite
 #
-# Result: 7 rows carry a negative. Four pair it with =1 and a positive. Two
-# (lines ~118, ~142) want GREEN, which is exit 0 exactly, so the exact-code
-# requirement is already met by construction. One - the forced-push row - had a
-# positive but no exact code, and now has =1.
+# Result, re-run at OMARK-59 after the shallow row gained a second negative: 7
+# rows carry a negative, and all 7 pair it with a positive AND either an exact
+# =1 or want=green, which is exit 0 exactly and so meets the exact-code
+# requirement by construction. Named rather than numbered deliberately - an
+# earlier revision cited "lines ~118, ~142" and the file has grown twice since,
+# so the numbers now point at the wrong rows while still reading as precise. The
+# two green ones are the genuine-fast-forward row and the exact-promotion row;
+# the forced-push row is the one that had a positive but no exact code, and now
+# has =1.
 #
 # What this enumeration CANNOT see: whether a message's wording drifts such that
 # a positive assertion still matches while meaning something else, and casing
@@ -116,12 +147,17 @@ run() {
     # which creates origin/dev for free and made the shallow branch reachable
     # whether or not the script fetched dev correctly. lore-web caught it.
     #
-    # With a plain `git fetch origin dev`, origin/dev is never created and the
-    # script dies at `git rev-parse origin/dev` with a bare git fatal and EXIT
-    # 128 - one line BEFORE the previous-HEAD test, so the shallow diagnosis is
-    # unreachable and a missing fetch-depth: 0 surfaces as an unannotated crash.
-    # The explicit refspec in the script is what makes this branch reachable at
-    # all; the case below asserts that, and refspec-drop is a mutation it catches.
+    # With a plain `git fetch origin dev`, origin/dev is never created, so the
+    # script never reaches the previous-HEAD test - it stops one step earlier at
+    # `rev-parse --verify -q origin/dev`. CORRECTED (ODOC-211): an earlier
+    # revision of this comment said that produced a bare git fatal and exit 128,
+    # and that the case below therefore caught a refspec drop. It does not. The
+    # -q verify is silent and its own shallow branch annotates and exits 1 with
+    # wording that satisfies every positive assertion on that case. The refspec
+    # is caught by the ABSENCE assertion on that row, added for this, not by the
+    # positives. How it got in: the 128 was measured against the guard BEFORE
+    # the second missing-object site was split, and the comment was not re-run
+    # afterwards - fixing one site is what made the other untested.
     # file:// is REQUIRED: git silently ignores --depth for a local PATH clone
     # and hands back a full one (opum-fleet). A fixture that quietly stops being
     # shallow is a test case that disables itself while still passing, so this
@@ -174,7 +210,16 @@ run "a full clone that cannot resolve the previous HEAD blames a rewrite" "$C4" 
 # =1 and +::error:: are the liveness half. Without them, dropping the fetch
 # refspec gives exit 128 with NO output, and -"rewrite orphaned" passes by
 # silence - the branch is unreachable and the case still goes green.
-run "a SHALLOW checkout blames the workflow, not the branch" "$C4" "$C2" false red yes =1 +"::error::" +"THIS CHECKOUT IS SHALLOW" +"fetch-depth: 0" -"rewrite orphaned"
+# The last assertion is what measures the FETCH REFSPEC, and it is a negative
+# because the two diagnoses are worded to overlap deliberately. Drop the refspec
+# and origin/dev is never created, so the rev-parse --verify split ONE STEP
+# EARLIER fires - and its message carries the same "THIS CHECKOUT IS SHALLOW",
+# the same "fetch-depth: 0" and the same exit 1 this row already asserted. Every
+# positive above passed under the mutant. Only the SENTENCE STEM differs, so
+# only asserting the other stem's absence can tell them apart. Found by opum-doc
+# (ODOC-211) running this suite verbatim; see the mutation reading in the header
+# for why our own notes had misdiagnosed it as a fixture artifact.
+run "a SHALLOW checkout blames the workflow, not the branch" "$C4" "$C2" false red yes =1 +"::error::" +"THIS CHECKOUT IS SHALLOW" +"fetch-depth: 0" -"rewrite orphaned" -"the fetch reported success but origin/dev still does not resolve"
 rm -rf "$S/ci"; git clone -q "$S/origin" "$S/ci" 2>/dev/null; git -C "$S/ci" checkout -q "$C4"
 out=$( cd "$S/ci" && BEFORE_SHA="" FORCED=false bash "$GUARD" 2>&1 ); rc=$?
 [ $rc -ne 0 ] && ok "refuses to report at all when BEFORE_SHA is unset" || no "unset BEFORE_SHA passed" "$rc" "$out"
@@ -202,6 +247,19 @@ if [ "$rc" = 1 ] && grep -qF -- "::error::" <<<"$out" \
   ok "dev missing from the remote blames the remote, with an annotation, not a bare exit 128"
 else
   no "dev missing from the remote" "$rc" "$out"
+fi
+# Separate row from the one above, so a failure names WHICH property broke: the
+# verdict can be right while the content is lossy, which is exactly what the
+# 2>/dev/null defect was. Asserted on "git said: fatal:" and NOT on "git said:"
+# alone - the stem is a constant this script prints unconditionally, so it is
+# satisfied by an EMPTY capture and would pass against the suppressed form. That
+# is the satisfied-by-silence shape one layer in, on a POSITIVE assertion rather
+# than a negative one. opum-doc (ODOC-211) shipped this fix and its assertion
+# first; OMARK-58 had recorded the defect and prescribed it without applying it.
+if grep -qF -- "git said: fatal:" <<<"$out"; then
+  ok "the fetch failure quotes git verbatim rather than only this script's paraphrase"
+else
+  no "fetch failure discards git's own text (2>/dev/null on a FAILURE-typed exit)" "$rc" "$out"
 fi
 
 
