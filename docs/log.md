@@ -6,3 +6,4 @@
 - 2026-09-11T19:22:56-05:00 bc87c6f21070298af25823cce434ed4302b223e1 chore(OMARK-42): close - interactive activation of the output style observed (#83)
 - 2026-09-13T17:52:32-05:00 322e61f8aeebc324522e93b62eda9e3a726a694a chore(OMARK-47): bump opum-lore pin to lore-cli v0.6.1 (#85)
 - 2026-09-14T01:40:22-05:00 4d1c19e4bb71218f611a3433e4398473f1a458f8 chore(OMARK-48): bump opum-lore pin to lore-cli v0.6.2 (#87)
+- 2026-09-15T16:34:32-05:00 0b8e9ee095eb44cef50882b2db0c7d4023c102ea fix(OMARK-59): measure the fetch refspec, and quote git verbatim (#120)

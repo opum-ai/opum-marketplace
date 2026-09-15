@@ -37,18 +37,26 @@
 # fixture supplies it for free" was a plausible cause, held for a whole session,
 # and disproved in one run by someone who re-ran it instead of reading it.
 #
-# FULL MUTATION RUN as of OMARK-59, each mutant PREDICTED before it was run and
-# named individually. Clean tree: 17 rows, 0 failed. drop assertion 1 -> DIED, 5
-# red. drop assertion 2 -> DIED, 1. drop assertion 3 -> DIED, 3. drop the fetch
-# refspec -> DIED, 1 (the shallow row; it SURVIVED at 0 before this task).
-# restore 2>/dev/null on the fetch -> DIED, 1 (the verbatim row). Versions,
-# because two gates with identical exit codes can be measuring different things:
-# bash 3.2.57 macOS, git 2.55.0, lore 0.7.0, quest 0.7.1. The CI runner's bash
-# is a DIFFERENT build from macOS's 3.2.57 and this suite has never printed it,
-# so no version is claimed for it here - what is measured is that the job
-# reports the same 17/0 (OMARK-59: run 35026221375, step "Promotion guard has a
-# passing proof suite"). If a bash-version difference ever matters, make the job
-# print it rather than asserting one from the runner image's reputation.
+# FULL MUTATION RUN as of OMARK-60, each mutant PREDICTED before it was run and
+# named individually, and re-run AFTER the change rather than only before it -
+# the rule OMARK-59 established, applied to its own successor. Clean tree: 19
+# rows, 0 failed.
+#
+#   SCRIPT       drop assertion 1 -> DIED, 5 red
+#                drop assertion 2 -> DIED, 1
+#                drop assertion 3 -> DIED, 3
+#                drop the fetch refspec -> DIED, 1 (SURVIVED at 0 before OMARK-59)
+#                restore 2>/dev/null on the fetch -> DIED, 1
+#   WORKFLOW     BEFORE_SHA -> ${{ github.sha }} -> DIED, 1
+#                env block deleted -> DIED, 2
+#
+# No version is ASSERTED for any of it. The suite prints its own bash and git
+# above the verdict (opum-doc ODOC-216), so every run - local or CI - names the
+# interpreter it actually ran under and a reader compares against their own
+# machine. That replaces a written claim this file twice carried and once got
+# wrong: OMARK-59 asserted "CI runs bash 5.x" from the runner image's
+# reputation, having never measured it, inside the very paragraph about naming
+# the object you measured.
 #
 # Cases come in MATCHED PAIRS where two conditions produce the same exit code
 # for different reasons (opum-web OWEB-8), and each asserts the ABSENCE of the
@@ -80,6 +88,12 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+# opum-doc ODOC-216, taken as shipped. This suite twice carried a WRITTEN claim
+# about the interpreter it ran under - once wrong (OMARK-59 asserted "CI runs
+# bash 5.x", never measured, from the runner image's reputation). Printing it is
+# strictly better than asserting it: local and CI runs each name their own, and
+# a later reader compares against their machine instead of trusting a sentence.
+echo "environment: bash $BASH_VERSION, $(git --version)"
 pass=0; fail=0
 ok()  { pass=$((pass+1)); echo "  ok   $1"; }
 no()  { fail=$((fail+1)); echo "  FAIL $1"; echo "       exit=$2"; echo "$3" | sed 's/^/       | /'; }
@@ -284,6 +298,29 @@ depth=$(awk '/^  main-is-fast-forward-of-dev:/{f=1;next} /^  [a-z-]+:$/{f=0} f' 
 grep -q 'fetch-depth: 0' <<<"$depth" \
   && ok "the promotion-guards job checks out with fetch-depth: 0" \
   || no "fetch-depth: 0 missing from the guard job" 1 "$depth"
+
+# lore-cli (PR #119) found the mechanism: deleting its workflow's explicit fetch
+# survived its suite at 0 red until a WIRING assertion pinned it, because the
+# script-level test exercises the script's DIAGNOSIS, which is a different site
+# from the wiring that feeds it. Ours had the same hole one field over - the two
+# checks above pin the run: line and fetch-depth: 0, and nothing pinned env.
+#
+# The two failure modes are NOT equally visible, which is the whole reason this
+# is worth a check. Measured, not reasoned:
+#   env block deleted        -> exit 1, loud ("BEFORE_SHA not set"). Survivable.
+#   BEFORE_SHA -> github.sha -> EXIT 0, GREEN, "main unchanged at <sha>".
+# The second is a gate that passes every promotion forever while measuring
+# nothing - the shape this whole script exists to stop, reached through its own
+# inputs. A script cannot detect it: from inside, a wrong BEFORE_SHA is
+# indistinguishable from a true one. Only the workflow text can say.
+for pair in 'BEFORE_SHA:github.event.before' 'FORCED:github.event.forced'; do
+  var="${pair%%:*}"; expr="${pair#*:}"
+  if grep -qE "^\s*${var}:\s*\\$\{\{\s*${expr}\s*\}\}\s*$" <<<"$depth"; then
+    ok "the guard job wires $var to $expr (a miswired $var goes GREEN forever)"
+  else
+    no "$var is not wired to $expr in the guard job" 1 "$depth"
+  fi
+done
 
 verdict_reached=yes
 echo
