@@ -58,6 +58,33 @@ push() { git -C "$S/work" push -q ${2:-} origin "${1}:refs/heads/main"; }
 # An assertion is  +text (must appear), -text (must NOT appear), or =N (exit
 # code must be exactly N).
 #
+# VACUITY ENUMERATION (opum-cli-e2e TASK-68), re-run 2026-09-16 after adding the
+# liveness fixes, because a sweep written to catch the earlier conditions had no
+# reason to look at whether the producer spoke at all. Query, so a later reader
+# can re-run it rather than trust this paragraph:
+#
+#   grep -n '^run ' scripts/test/assert-main-fast-forward.test.sh
+#   ... then for each line carrying a -"..." assertion, check it also carries
+#   an exact =N (or want=green, which is exit 0 exactly) AND a +"..." positive.
+#   grep -n '!/' scripts/test/report.test.mjs   # the same shape in the other suite
+#
+# Result: 7 rows carry a negative. Four pair it with =1 and a positive. Two
+# (lines ~118, ~142) want GREEN, which is exit 0 exactly, so the exact-code
+# requirement is already met by construction. One - the forced-push row - had a
+# positive but no exact code, and now has =1.
+#
+# What this enumeration CANNOT see: whether a message's wording drifts such that
+# a positive assertion still matches while meaning something else, and casing
+# drift, since grep -F is case-sensitive.
+#
+# opum-cli-e2e's fourth vacuity condition is the one that motivated the re-run:
+# beyond (a) subject never present, (b) source empty or unreadable, (c) undefined
+# interpolated id, there is (d) THE PRODUCER DIED BEFORE EMITTING ANYTHING. (d)
+# is the worst of the four because the row's own harness failed, so one early
+# exit turns EVERY negative in that row into a pass at once - vacuity applied to
+# the suite rather than to a check. That is why the abort trap below is the
+# load-bearing fix of the three and not the cosmetic one it looks like.
+#
 # =N and a positive assertion are both REQUIRED wherever a negative one is used.
 # opum-web found the reason: a negative assertion is satisfied by SILENCE. If the
 # script dies early - exit 128 from a bare git fatal, say - it emits no message,
@@ -118,7 +145,7 @@ seed; push "$C4"
 run "accepts a genuine fast-forward promotion" "$C4" "$C2" false green no +"moved forward" +"nothing left behind" -"::warning::"
 seed; push "$C4"; push "$C1" -f
 run "rejects an unforced rewind (assertion 1, the original defect)" "$C1" "$C4" false red no =1 +"REWOUND" -"FORCE-PUSHED" -"::warning::"
-run "names a FORCED push distinctly from a rewind" "$C1" "$C4" true red no +"FORCE-PUSHED" -"REWOUND"
+run "names a FORCED push distinctly from a rewind" "$C1" "$C4" true red no =1 +"FORCE-PUSHED" -"REWOUND"
 seed
 git -C "$S/work" checkout -q -b tmp "$C4"; git -C "$S/work" commit -q --allow-empty -m "Merge pull request #1"
 M=$(git -C "$S/work" rev-parse HEAD); push "$M" -f
