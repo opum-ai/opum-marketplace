@@ -35,8 +35,18 @@ forced="${FORCED:-false}"
 # with dev absent from the remote, the bare fetch exited 128 with ZERO ::error::
 # annotations, which is the same unannotated-crash failure the shallow split
 # exists to prevent.
-if ! git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>/dev/null; then
-  echo "::error::could not fetch dev from origin, so main cannot be compared against it. This is a fault in the WORKFLOW or the remote, NOT evidence about main: the usual causes are that dev has been renamed or deleted on the remote, or the job is pointed at the wrong remote. main is very probably fine."
+#
+# A wrapper that paraphrases a tool's error owes the operator the original, and
+# the sites where that matters are exactly the sites where a non-zero exit means
+# FAILURE rather than ANSWER - a typing distinction, so it is mechanical rather
+# than a judgement call (quest-cli). This site is a FAILURE, so stderr is
+# captured and quoted verbatim; the `cat-file -e` probe below is an ANSWER and
+# keeps its 2>/dev/null. OMARK-58 recorded the defect here and prescribed this
+# exact fix without applying it; opum-doc ODOC-211 shipped it first and sent it
+# back. Measured with dev deleted from the remote: "...main is very probably
+# fine. git said: fatal: couldn't find remote ref refs/heads/dev".
+if ! fetch_err="$(git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>&1)"; then
+  echo "::error::could not fetch dev from origin, so main cannot be compared against it. This is a fault in the WORKFLOW or the remote, NOT evidence about main: the usual causes are that dev has been renamed or deleted on the remote, or the job is pointed at the wrong remote. main is very probably fine. git said: $(printf '%s' "$fetch_err" | tr '\n' ' ')"
   exit 1
 fi
 head_sha="$(git rev-parse HEAD)"
