@@ -152,6 +152,77 @@ jobs:
           fi
           node scripts/check-federated-content.mjs
 
+  # OMARK-52, closing this repository's half of the fleet-wide gap OPAG-146.
+  # The operating block makes a green `lore check` the definition of done for
+  # a docs change, and until this job existed nothing here enforced it - the
+  # check ran only when a session remembered to run it by hand. A gate people
+  # believe in and nothing enforces is the same defect the comments above keep
+  # warning about.
+  #
+  # Neither CLI version is a hand-maintained pin, because a second pin drifts
+  # from the first silently (opum-agent's sat two minor releases behind its
+  # installed CLI before anyone noticed). Both are read out of the file that
+  # already declares them:
+  #
+  #   - lore comes from the opum-lore federated pin in marketplace.json. This
+  #     repository's whole purpose is to serve a skill cut from the same
+  #     release tag as the CLI it describes, and the pin is held at whatever
+  #     is npm-published (OMARK-47/48/49). Installing that exact version here
+  #     means the docs bundle is checked by the CLI the index actually serves,
+  #     and a pin bumped ahead of npm publish fails this job on the install
+  #     step instead of pointing consumers at a release nobody can get.
+  #   - quest comes from the managed block in CLAUDE.md, the same derivation
+  #     the tracker job below uses. It is installed because .lore/config.toml
+  #     sets [tracker] backend = "quest", and lore's quest adapter shells out
+  #     to the binary when a Story carries a task block. Today's bundle has no
+  #     such Story and `lore check` passes with quest absent from PATH
+  #     (measured locally at ba564ef), so this is insurance for the first
+  #     coupled Story rather than a dependency the current tree exercises.
+  lore-check:
+    name: lore check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Resolve the lore version the opum-lore pin declares
+        id: lore
+        run: |
+          set -euo pipefail
+          ref="$(node -e '
+            const m = require("./.claude-plugin/marketplace.json");
+            const e = m.plugins.find((p) => p.name === "opum-lore");
+            if (!e) throw new Error("no opum-lore entry in marketplace.json");
+            process.stdout.write(e.source.ref || "");
+          ')"
+          version="${ref#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            echo "::error file=.claude-plugin/marketplace.json::opum-lore pin '$ref' is not a release tag, so there is no lore version to install for lore check."
+            exit 1
+          fi
+          echo "Declared lore version: $version (from opum-lore ref $ref)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the Quest version CLAUDE.md declares
+        id: quest
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/.*Quest CLI \([0-9][0-9.]*\).*/\1/p' CLAUDE.md | head -1)"
+          if [ -z "$version" ]; then
+            echo "::error file=CLAUDE.md::No 'Quest CLI <version>' line found in the managed block; lore's quest adapter needs a declared version to install."
+            exit 1
+          fi
+          echo "Declared Quest version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install lore and quest at the declared versions
+        run: npm install -g "@opum-ai/lore@${{ steps.lore.outputs.version }}" "@opum-ai/quest@${{ steps.quest.outputs.version }}"
+
+      - name: lore check
+        run: lore check
+
   # OPAG-79, fleet-wide. Two failure modes that both reach dev without any
   # commit here to blame for them:
   #
