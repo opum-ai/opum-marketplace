@@ -59,7 +59,15 @@ run() {
     # unreachable and a missing fetch-depth: 0 surfaces as an unannotated crash.
     # The explicit refspec in the script is what makes this branch reachable at
     # all; the case below asserts that, and refspec-drop is a mutation it catches.
+    # file:// is REQUIRED: git silently ignores --depth for a local PATH clone
+    # and hands back a full one (opum-fleet). A fixture that quietly stops being
+    # shallow is a test case that disables itself while still passing, so this
+    # asserts the precondition and FAILS rather than skipping.
     git clone -q --depth 1 "file://$S/origin" --branch main "$S/ci" 2>/dev/null
+    if [ "$(git -C "$S/ci" rev-parse --is-shallow-repository)" != "true" ]; then
+      no "$label (FIXTURE BROKEN: clone is not shallow, so this case measures nothing)" 0 ""
+      return
+    fi
   else
     git clone -q "$S/origin" "$S/ci" 2>/dev/null
     git -C "$S/ci" checkout -q "$sha"
