@@ -46,15 +46,20 @@ run() {
   local label="$1" sha="$2" before="$3" forced="$4" want="$5" shallow="$6"; shift 6
   rm -rf "$S/ci"
   if [ "$shallow" = yes ]; then
-    # A --depth 1 clone cannot check out an arbitrary commit, so HEAD here is
-    # dev's tip rather than main's pushed SHA. Stated because it is a real
-    # difference from the production shape: what the case proves is that the
-    # unresolvable-previous-HEAD branch is REACHED in a shallow clone and takes
-    # the shallow diagnosis, not that every other assertion behaves identically
-    # under one. Assertion 2 passes trivially here (HEAD is dev's tip), which is
-    # why the shallow branch is reached at all rather than dying earlier under
-    # set -e - a question quest-web raised against its own variant.
-    git clone -q --depth 1 "file://$S/origin" --branch dev "$S/ci" 2>/dev/null
+    # PRODUCTION SHAPE, and getting this wrong hid a real defect. actions/checkout
+    # on a push to main with the default depth produces a SHALLOW, SINGLE-BRANCH
+    # clone of MAIN - so remote.origin.fetch covers only main and `origin/dev`
+    # does not exist. An earlier version of this fixture cloned --branch dev,
+    # which creates origin/dev for free and made the shallow branch reachable
+    # whether or not the script fetched dev correctly. lore-web caught it.
+    #
+    # With a plain `git fetch origin dev`, origin/dev is never created and the
+    # script dies at `git rev-parse origin/dev` with a bare git fatal and EXIT
+    # 128 - one line BEFORE the previous-HEAD test, so the shallow diagnosis is
+    # unreachable and a missing fetch-depth: 0 surfaces as an unannotated crash.
+    # The explicit refspec in the script is what makes this branch reachable at
+    # all; the case below asserts that, and refspec-drop is a mutation it catches.
+    git clone -q --depth 1 "file://$S/origin" --branch main "$S/ci" 2>/dev/null
   else
     git clone -q "$S/origin" "$S/ci" 2>/dev/null
     git -C "$S/ci" checkout -q "$sha"
