@@ -49,6 +49,12 @@
 #                restore 2>/dev/null on the fetch -> DIED, 1
 #   WORKFLOW     BEFORE_SHA -> ${{ github.sha }} -> DIED, 1
 #                env block deleted -> DIED, 2
+#                mappings left ONLY as comments, guard disabled underneath
+#                  -> DIED, 2 (OMARK-62, from opum-doc ODOC-218)
+#
+# That last one measures the EXTRACTION, not the workflow, which is why it is
+# worth its own row: it is the only mutant here whose death is caused by the
+# `sed 's/#.*//'` and the awk job-scoping below rather than by an assertion.
 #
 # No version is ASSERTED for any of it. The suite prints its own bash and git
 # above the verdict (opum-doc ODOC-216), so every run - local or CI - names the
@@ -334,6 +340,15 @@ grep -q 'fetch-depth: 0' <<<"$depth" \
 # nothing - the shape this whole script exists to stop, reached through its own
 # inputs. A script cannot detect it: from inside, a wrong BEFORE_SHA is
 # indistinguishable from a true one. Only the workflow text can say.
+# Both greps read $depth, which is COMMENT-STRIPPED and JOB-SCOPED, and that is
+# load-bearing rather than tidiness - do not simplify either away. lore-web's
+# instruction-versus-explanation trap applies to this check with unusual force:
+# the job's own comments EXPLAIN this wiring and therefore contain the exact
+# strings grepped for, so a whole-file grep would be satisfied by PROSE against
+# a workflow that had stopped doing it. For a check whose entire job is to
+# notice a disabled guard, that is the worst available failure. Measured, not
+# reasoned (OMARK-62, mutant from opum-doc ODOC-218): comment both mappings out,
+# repoint BEFORE_SHA to github.sha underneath, and this dies 2 red.
 for pair in 'BEFORE_SHA:github.event.before' 'FORCED:github.event.forced'; do
   var="${pair%%:*}"; expr="${pair#*:}"
   if grep -qE "^\s*${var}:\s*\\$\{\{\s*${expr}\s*\}\}\s*$" <<<"$depth"; then
