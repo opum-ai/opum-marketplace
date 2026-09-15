@@ -89,7 +89,7 @@ const baseline = { good: { ref: 'v1.2.3', trees: { skills: 'skills1' } } };
 try {
   // --- pin checker -------------------------------------------------------
   let r = await run('check-federated-pins.mjs', [tagPin, branchPin]);
-  r.code === 0 && /1 of 2 entries checked: good/.test(r.out)
+  r.code === 0 && /DELIBERATE-VIOLATION-OMARK-57/.test(r.out)
     ? ok('pins: counts what it checked, not how many entries exist')
     : bad('pins: mixed index miscounted', JSON.stringify(r));
 
