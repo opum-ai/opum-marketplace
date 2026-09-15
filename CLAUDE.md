@@ -18,12 +18,15 @@ federated, and how to change it.
 
 `dev` is the integration branch and the default branch. `main` is promoted
 from it by fast-forward push once required checks are green on the exact
-commit — `git push origin dev:main`, never the merge button (see
-`.github/workflows/promotion-guards.yml`, which fails a PR-button merge into
-`main` on purpose as the detection for that mistake). `check · manifests` is
-the one required check on `main`: it validates every `marketplace.json` entry's
-shape, and on any PR touching the file, fetches each pinned tag live to
-confirm its own `plugin.json` actually declares the version being pinned.
+commit — `git push origin origin/dev:main` (the remote-tracking ref, not
+local `dev`, which can be stale on a recycled session — ODOC-193), never
+the merge button (see `.github/workflows/promotion-guards.yml`, which fails
+a PR-button merge into `main` on purpose as the detection for that
+mistake). `check · manifests` and `Tracker integrity` are the required
+checks on `main`. `check · manifests` validates every `marketplace.json`
+entry's shape, and on any PR touching the file, fetches each pinned tag
+live to confirm its own `plugin.json` actually declares the version being
+pinned.
 
 It also checks that a pinned tag still carries the skill content we verified,
 which the version check above cannot see: a pin names a tag, and a tag name is
