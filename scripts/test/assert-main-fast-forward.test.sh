@@ -6,6 +6,21 @@
 # run was green and "green" only ever meant the other jobs passed. Five sessions
 # found five independent defects in the same copied shape in one evening.
 #
+# MUTATION READING, measured 2026-09-16 rather than reasoned. Under the BAD
+# fixture (--depth 1 --branch dev, which supplies origin/dev for free): drop
+# assertion 1 -> DIED, 6 red. Drop assertion 3 -> DIED, 5 red. Drop the fetch
+# refspec -> SURVIVED, 0 red. So a fixture defect does NOT produce 100% mutant
+# survival unless it disables the whole suite; it produces survival of exactly
+# the mutants whose property that fixture disabled - here 1 of 3. That is a
+# QUIET signal, not a loud one: among heterogeneous mutants it reads like "this
+# mutant was equivalent".
+#
+# Two consequences for how a mutation run is gated. It must assert that EVERY
+# mutant dies, named individually - a survival rate is the wrong summary when
+# one survivor is the whole finding. And the mutant set must actually touch the
+# property in question: the refspec mutant was never run against the old
+# fixture, so no reading of that run, however careful, could have caught it.
+#
 # Cases come in MATCHED PAIRS where two conditions produce the same exit code
 # for different reasons (opum-web OWEB-8), and each asserts the ABSENCE of the
 # other's wording - a single over-broad message would pass a presence-only test
@@ -171,6 +186,24 @@ seed; push "$C3"
 run "a partial promotion (ODOC-193) WARNS and stays GREEN" "$C3" "$C2" false green no +"commit(s) BEHIND dev" +"origin/dev:main"
 run "the warning names the commit left behind" "$C3" "$C2" false green no +"Left behind:" +"c4"
 run "the warning says it cannot tell a partial promotion from an advancing dev" "$C3" "$C2" false green no +"CANNOT tell those two apart"
+
+echo "missing dev on the remote (second missing-object site)"
+seed; push "$C4"
+git -C "$S/origin" symbolic-ref HEAD refs/heads/main
+git -C "$S/work" push -q origin --delete dev 2>/dev/null
+rm -rf "$S/ci"; git clone -q "$S/origin" "$S/ci" 2>/dev/null; git -C "$S/ci" checkout -q "$C4" 2>/dev/null
+out=$( cd "$S/ci" && BEFORE_SHA="$C2" FORCED=false bash "$GUARD" 2>&1 ); rc=$?
+# quest-cli: this site runs one step BEFORE the previous-HEAD test, so the split
+# added there cannot cover it - execution never arrives. Before the fix this was
+# exit 128 with zero annotations. Exact code AND liveness, per the silence rule.
+if [ "$rc" = 1 ] && grep -qF -- "::error::" <<<"$out" \
+   && grep -qF -- "renamed or deleted on the remote" <<<"$out" \
+   && ! grep -qF -- "THIS CHECKOUT IS SHALLOW" <<<"$out"; then
+  ok "dev missing from the remote blames the remote, with an annotation, not a bare exit 128"
+else
+  no "dev missing from the remote" "$rc" "$out"
+fi
+
 
 echo "workflow wiring (static)"
 # lore-web's instruction-versus-explanation trap: the job's own COMMENT names

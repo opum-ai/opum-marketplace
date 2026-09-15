@@ -28,9 +28,27 @@ forced="${FORCED:-false}"
 # Explicit refspec (quest-web QWEB-46): bare `git fetch origin dev` relies on
 # git's opportunistic remote-tracking update, which works under actions/checkout's
 # narrowed refspec but is not guaranteed by it. Nothing asserted that; this does.
-git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev'
+# EVERY site that reports a missing git object needs the same two-causes split
+# (quest-cli). Fixing it only where the defect was first reported is the easiest
+# kind of under-application, and this site executes one step BEFORE the one that
+# was fixed - so execution never reaches that diagnosis. Measured before fixing:
+# with dev absent from the remote, the bare fetch exited 128 with ZERO ::error::
+# annotations, which is the same unannotated-crash failure the shallow split
+# exists to prevent.
+if ! git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>/dev/null; then
+  echo "::error::could not fetch dev from origin, so main cannot be compared against it. This is a fault in the WORKFLOW or the remote, NOT evidence about main: the usual causes are that dev has been renamed or deleted on the remote, or the job is pointed at the wrong remote. main is very probably fine."
+  exit 1
+fi
 head_sha="$(git rev-parse HEAD)"
-dev_sha="$(git rev-parse origin/dev)"
+if ! dev_sha="$(git rev-parse --verify -q origin/dev)"; then
+  # Same missing object, two causes, same split as the previous-HEAD test below.
+  if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+    echo "::error::the fetch reported success but origin/dev still does not resolve, and THIS CHECKOUT IS SHALLOW. This is a fault in the WORKFLOW, not in the promotion: the job needs actions/checkout with 'fetch-depth: 0'. main is very probably fine - fix the checkout and re-run."
+  else
+    echo "::error::the fetch reported success but origin/dev still does not resolve, in a clone that is NOT shallow, so this is not a fetch-depth problem. Treat as a real anomaly in the remote's refs rather than a pass."
+  fi
+  exit 1
+fi
 
 # ASSERTION 2 - came from dev. Unchanged from the original; do not drop it.
 if ! git merge-base --is-ancestor "$head_sha" "$dev_sha"; then
