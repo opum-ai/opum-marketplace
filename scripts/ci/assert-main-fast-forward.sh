@@ -28,7 +28,7 @@ forced="${FORCED:-false}"
 # Explicit refspec (quest-web QWEB-46): bare `git fetch origin dev` relies on
 # git's opportunistic remote-tracking update, which works under actions/checkout's
 # narrowed refspec but is not guaranteed by it. Nothing asserted that; this does.
-git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev'
+git fetch --no-tags --quiet origin dev
 head_sha="$(git rev-parse HEAD)"
 dev_sha="$(git rev-parse origin/dev)"
 
