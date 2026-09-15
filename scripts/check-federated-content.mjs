@@ -20,6 +20,8 @@
 // tag over IDENTICAL content resolves to the same subtree and passes untouched.
 // Only a repoint that actually changes the skill fails.
 
+import { classifyEntry } from './check-federated-pins.mjs';
+
 const DEFAULT_API_BASE = 'https://api.github.com';
 
 function headers() {
@@ -82,12 +84,14 @@ export async function resolveSubtree(apiBase, repo, ref, subtree) {
 
 // null = nothing to check or the entry is good; a string = the problem.
 export async function checkEntry(p, baselines, apiBase = DEFAULT_API_BASE) {
+  // Scope is decided by check-federated-pins.mjs's classifyEntry, deliberately
+  // shared: two checkers with two copies of "which entries are in scope" drift
+  // apart silently, and a pin that fell out of scope in one but not the other
+  // would be reported as verified by whichever still listed it (OMARK-57).
+  const { scope, reason } = classifyEntry(p);
+  if (scope === 'skipped') return null;
+  if (scope === 'malformed') return `${p.name}: ${reason}`;
   const s = p.source;
-  // Only tag pins are in scope. A branch pin (opum-output-styles tracks main)
-  // has no fixed content by design, and a sha pin is already immutable.
-  if (!s || typeof s !== 'object' || s.source !== 'github' || !s.ref || !/^v/.test(s.ref)) {
-    return null;
-  }
 
   const baseline = baselines[p.name];
   if (!baseline) {
@@ -109,22 +113,45 @@ export async function checkEntry(p, baselines, apiBase = DEFAULT_API_BASE) {
 
 export async function checkMarketplace(market, baselines, apiBase = DEFAULT_API_BASE) {
   const problems = [];
+  const verified = [];
+  const skipped = [];
   for (const p of market.plugins) {
+    const { scope, reason } = classifyEntry(p);
+    if (scope === 'skipped') skipped.push({ name: p.name, reason });
     const problem = await checkEntry(p, baselines, apiBase);
     if (problem) problems.push(problem);
+    // verified means "this run resolved its subtree and it matched", not
+    // "a baseline exists for it". The old code reported the baselines file's
+    // KEYS, so it named entries as verified on a run that fetched none of them.
+    else if (scope === 'checked') verified.push(p.name);
   }
-  return problems;
+  return { problems, verified, skipped };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { readFileSync } = await import('node:fs');
   const market = JSON.parse(readFileSync('.claude-plugin/marketplace.json', 'utf8'));
   const baselines = JSON.parse(readFileSync('scripts/federated-pin-baselines.json', 'utf8'));
-  const problems = await checkMarketplace(market, baselines);
+  // Env override mirrors FEDERATED_PIN_RAW_BASE in the pin checker, and exists
+  // for the same reason: without it the CLI path - where the summary is
+  // composed - is unreachable by any test, which is exactly the gap OMARK-57
+  // was filed about.
+  const apiBase = process.env.FEDERATED_CONTENT_API_BASE || DEFAULT_API_BASE;
+  const { problems, verified, skipped } = await checkMarketplace(market, baselines, apiBase);
+  for (const s of skipped) console.log(`out of scope: ${s.name} - ${s.reason}`);
   if (problems.length) {
     for (const p of problems) console.log(`::error::${p}`);
     process.exit(1);
   }
-  const checked = Object.keys(baselines).filter((k) => !k.startsWith('$'));
-  console.log(`federated content OK (${checked.length} pinned entry/entries verified: ${checked.join(', ')})`);
+  // An unreferenced baseline is not a failure, but it must not be counted as
+  // verified either - it is a record of something this index no longer pins.
+  const orphans = Object.keys(baselines).filter((k) => !k.startsWith('$') && !verified.includes(k));
+  for (const o of orphans) {
+    console.log(`note: baseline recorded for "${o}" but no in-scope entry of that name was resolved this run.`);
+  }
+  console.log(
+    verified.length
+      ? `federated content OK (${verified.length} of ${market.plugins.length} entries resolved and matched their baseline: ${verified.join(', ')}${skipped.length ? `; ${skipped.length} out of scope, listed above` : ''})`
+      : `federated content: NOTHING WAS RESOLVED - no in-scope tag pin was checked against a baseline. This is not a pass; see the out-of-scope lines above.`,
+  );
 }

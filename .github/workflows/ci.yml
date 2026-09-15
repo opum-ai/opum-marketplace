@@ -80,6 +80,18 @@ jobs:
       - name: Federated content checker has a passing regression test
         run: node scripts/test/check-federated-content.test.mjs
 
+      # OMARK-57. The two suites above cover the ASSERTIONS. Neither reaches the
+      # CLI main block, where each checker composes its success message - and
+      # the message was the half that lied: pins printed market.plugins.length
+      # ("3 plugin(s) checked") while only ever checking v-prefixed tag pins,
+      # and content named the BASELINES FILE'S KEYS as verified on runs that
+      # resolved none of them. A dropped "v" in a pin bump made the whole
+      # federation check a no-op that still reported success with zero network
+      # calls. This suite runs each script as a subprocess against fixture
+      # working directories and asserts the emitted text, not the exit code.
+      - name: Checker reports say what was actually measured
+        run: node scripts/test/report.test.mjs
+
       # A federated entry pins a tag so its skill can never drift from the CLI
       # it describes (OPAG-37) - but a pin only does that if the tagged
       # release actually carries the content the pin implies. lore-cli's
