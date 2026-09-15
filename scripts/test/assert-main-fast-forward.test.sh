@@ -43,9 +43,12 @@
 # refspec -> DIED, 1 (the shallow row; it SURVIVED at 0 before this task).
 # restore 2>/dev/null on the fetch -> DIED, 1 (the verbatim row). Versions,
 # because two gates with identical exit codes can be measuring different things:
-# bash 3.2.57 macOS, git 2.55.0, lore 0.7.0, quest 0.7.1. CI runs bash 5.x,
-# which is a DIFFERENT object from the one measured here - the PR's own run is
-# what speaks for it.
+# bash 3.2.57 macOS, git 2.55.0, lore 0.7.0, quest 0.7.1. The CI runner's bash
+# is a DIFFERENT build from macOS's 3.2.57 and this suite has never printed it,
+# so no version is claimed for it here - what is measured is that the job
+# reports the same 17/0 (OMARK-59: run 35026221375, step "Promotion guard has a
+# passing proof suite"). If a bash-version difference ever matters, make the job
+# print it rather than asserting one from the runner image's reputation.
 #
 # Cases come in MATCHED PAIRS where two conditions produce the same exit code
 # for different reasons (opum-web OWEB-8), and each asserts the ABSENCE of the
