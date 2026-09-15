@@ -21,7 +21,21 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GUARD="$HERE/../ci/assert-main-fast-forward.sh"
 S="$(mktemp -d)"
-trap 'rm -rf "$S"' EXIT
+verdict_reached=no
+# opum-web: a proof that can truncate silently is the "reads as working forever"
+# failure applied to the prover. If this exits before printing its verdict, the
+# PASS lines above it are not a pass - cases after the abort never ran.
+cleanup() {
+  local rc=$?
+  rm -rf "$S"
+  if [ "$verdict_reached" != yes ]; then
+    echo
+    echo "PROOF ABORTED EARLY (exit $rc) - the suite did not reach its verdict."
+    echo "Do NOT read the PASS lines above as a pass: cases after the abort never ran."
+    exit "${rc:-1}"
+  fi
+}
+trap cleanup EXIT
 pass=0; fail=0
 ok()  { pass=$((pass+1)); echo "  ok   $1"; }
 no()  { fail=$((fail+1)); echo "  FAIL $1"; echo "       exit=$2"; echo "$3" | sed 's/^/       | /'; }
@@ -41,7 +55,14 @@ seed() {
 push() { git -C "$S/work" push -q ${2:-} origin "${1}:refs/heads/main"; }
 
 # run <label> <main-sha> <before> <forced> <want green|red> <shallow yes|no> <assertions...>
-# An assertion is  +text  (must appear)  or  -text  (must NOT appear).
+# An assertion is  +text (must appear), -text (must NOT appear), or =N (exit
+# code must be exactly N).
+#
+# =N and a positive assertion are both REQUIRED wherever a negative one is used.
+# opum-web found the reason: a negative assertion is satisfied by SILENCE. If the
+# script dies early - exit 128 from a bare git fatal, say - it emits no message,
+# so every -text passes and "red" is satisfied by any non-zero. The negative
+# reads like the rigorous half of a matched pair and is the half that fails open.
 run() {
   local label="$1" sha="$2" before="$3" forced="$4" want="$5" shallow="$6"; shift 6
   rm -rf "$S/ci"
@@ -68,6 +89,13 @@ run() {
       no "$label (FIXTURE BROKEN: clone is not shallow, so this case measures nothing)" 0 ""
       return
     fi
+    # quest-web: a shallow clone holds no tree for any commit but the one it
+    # landed on, so assert HEAD is the commit this case means to test rather
+    # than whatever the remote's HEAD happened to name.
+    if [ "$(git -C "$S/ci" rev-parse HEAD)" != "$sha" ]; then
+      no "$label (FIXTURE BROKEN: HEAD is $(git -C "$S/ci" rev-parse --short HEAD), not the commit under test)" 0 ""
+      return
+    fi
   else
     git clone -q "$S/origin" "$S/ci" 2>/dev/null
     git -C "$S/ci" checkout -q "$sha"
@@ -80,6 +108,7 @@ run() {
   for a in "$@"; do
     if [ "${a:0:1}" = "+" ] && ! grep -qF -- "${a:1}" <<<"$out"; then no "$label (missing: ${a:1})" "$rc" "$out"; return; fi
     if [ "${a:0:1}" = "-" ] &&   grep -qF -- "${a:1}" <<<"$out"; then no "$label (should not say: ${a:1})" "$rc" "$out"; return; fi
+    if [ "${a:0:1}" = "=" ] && [ "$rc" != "${a:1}" ]; then no "$label (wanted exit ${a:1}, got $rc - a different non-zero is a different failure)" "$rc" "$out"; return; fi
   done
   ok "$label"
 }
@@ -88,19 +117,22 @@ echo "movement and containment"
 seed; push "$C4"
 run "accepts a genuine fast-forward promotion" "$C4" "$C2" false green no +"moved forward" +"nothing left behind" -"::warning::"
 seed; push "$C4"; push "$C1" -f
-run "rejects an unforced rewind (assertion 1, the original defect)" "$C1" "$C4" false red no +"REWOUND" -"FORCE-PUSHED" -"::warning::"
+run "rejects an unforced rewind (assertion 1, the original defect)" "$C1" "$C4" false red no =1 +"REWOUND" -"FORCE-PUSHED" -"::warning::"
 run "names a FORCED push distinctly from a rewind" "$C1" "$C4" true red no +"FORCE-PUSHED" -"REWOUND"
 seed
 git -C "$S/work" checkout -q -b tmp "$C4"; git -C "$S/work" commit -q --allow-empty -m "Merge pull request #1"
 M=$(git -C "$S/work" rev-parse HEAD); push "$M" -f
-run "rejects a commit dev never held (assertion 2)" "$M" "$C2" false red no +"not a commit dev ever held" +"unrecoverable" -"REWOUND"
+run "rejects a commit dev never held (assertion 2)" "$M" "$C2" false red no =1 +"not a commit dev ever held" +"unrecoverable" -"REWOUND"
 
 echo "previous position"
 seed; push "$C4"
 run "accepts branch creation without claiming forward movement" "$C4" "0000000000000000000000000000000000000000" false green no +"did not exist before"
 run "accepts an unchanged re-push" "$C4" "$C4" false green no +"unchanged at"
-run "a full clone that cannot resolve the previous HEAD blames a rewrite" "$C4" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" false red no +"not a fetch-depth problem" +"rewrite orphaned" -"SHALLOW"
-run "a SHALLOW checkout blames the workflow, not the branch" "$C4" "$C2" false red yes +"THIS CHECKOUT IS SHALLOW" +"fetch-depth: 0" -"rewrite orphaned"
+run "a full clone that cannot resolve the previous HEAD blames a rewrite" "$C4" "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" false red no =1 +"::error::" +"not a fetch-depth problem" +"rewrite orphaned" -"THIS CHECKOUT IS SHALLOW"
+# =1 and +::error:: are the liveness half. Without them, dropping the fetch
+# refspec gives exit 128 with NO output, and -"rewrite orphaned" passes by
+# silence - the branch is unreachable and the case still goes green.
+run "a SHALLOW checkout blames the workflow, not the branch" "$C4" "$C2" false red yes =1 +"::error::" +"THIS CHECKOUT IS SHALLOW" +"fetch-depth: 0" -"rewrite orphaned"
 rm -rf "$S/ci"; git clone -q "$S/origin" "$S/ci" 2>/dev/null; git -C "$S/ci" checkout -q "$C4"
 out=$( cd "$S/ci" && BEFORE_SHA="" FORCED=false bash "$GUARD" 2>&1 ); rc=$?
 [ $rc -ne 0 ] && ok "refuses to report at all when BEFORE_SHA is unset" || no "unset BEFORE_SHA passed" "$rc" "$out"
@@ -132,6 +164,7 @@ grep -q 'fetch-depth: 0' <<<"$depth" \
   && ok "the promotion-guards job checks out with fetch-depth: 0" \
   || no "fetch-depth: 0 missing from the guard job" 1 "$depth"
 
+verdict_reached=yes
 echo
 echo "passed $pass, failed $fail"
 [ $fail -eq 0 ]
