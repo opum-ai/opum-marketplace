@@ -63,11 +63,32 @@
 # other's wording - a single over-broad message would pass a presence-only test
 # in both directions.
 #
-# This proves the SCRIPT'S LOGIC. It does not prove the WORKFLOW WIRING - that
-# BEFORE_SHA/FORCED are populated from the github.event context and that
-# fetch-depth: 0 supplies main's previous HEAD. The guard job is gated on
-# push-to-main, so that stays unproven until this repository's first real
-# promotion after this lands. Do not report it as proven end-to-end before then.
+# This proves the SCRIPT'S LOGIC, and OMARK-60 pins the workflow's TEXT (that
+# env maps BEFORE_SHA to github.event.before and FORCED to github.event.forced).
+# Neither can show that GitHub POPULATES those correctly at runtime.
+#
+# That last half is now measured, and the note that used to sit here saying to
+# wait for it has been replaced rather than left to rot - a stale "unproven" is
+# the same defect as a stale claim, one sign flipped, and it costs a later
+# reader either a re-derivation or misplaced distrust. This repository's first
+# real promotion under this script, run 35031089133 on 65c3be9, printed:
+#
+#   main moved forward 432b95931b8203c347f81c9c0824cca686ac087d -> 65c3be97...;
+#   its HEAD is a commit dev holds (dev tip 65c3be97...), and is dev's tip
+#   exactly, with nothing left behind.
+#
+# 432b959 was main's true previous HEAD - it matches the promotion push's own
+# "432b959..65c3be9" - so BEFORE_SHA really did arrive from github.event.before
+# rather than defaulting to something that merely looks right. All three
+# assertions spoke, and NO shallow diagnosis appeared, so fetch-depth: 0 and the
+# explicit refspec both did their job against a real actions/checkout.
+#
+# BOUNDED, because "proven end-to-end" is exactly the kind of claim this file
+# exists to distrust. One successful promotion with a non-zero BEFORE_SHA shows
+# the HAPPY path is wired. It does not exercise FORCED (false throughout), the
+# all-zeros branch-creation path, or any failing branch against real Actions
+# inputs - those remain proven by the suite's fixtures only. A green promotion
+# run is not evidence that a RED one would have been reported correctly.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
