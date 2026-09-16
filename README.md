@@ -49,6 +49,24 @@ or eval here. To change what ships:
 **This repository is public.** Nothing in it may carry an absolute machine
 path, a username, an internal hostname, or a credential.
 
+## Staying current
+
+Adding this marketplace clones it once; nothing after that keeps the clone in
+sync automatically. `claude plugin marketplace list --json` reports only a
+marketplace's name, source, and install path — no version, commit, or
+last-synced timestamp — so a session has no built-in signal that its local
+clone is behind this repository's `main`. Before relying on a recent change
+here, refresh explicitly:
+
+```
+/plugin marketplace update opum
+```
+
+There is no cheaper mechanism than that manual refresh: nothing in this
+repository executes inside a consumer's session, so it cannot push a
+staleness warning into one, and the Claude Code CLI itself does not currently
+expose a way to compare a cloned marketplace against its source.
+
 ## Licence
 
 MIT. See `LICENSE`.
