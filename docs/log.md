@@ -12,3 +12,4 @@
 - 2026-09-15T17:31:46-05:00 064d292b972f61c2c0cc99b297c3ad7fb514bd19 chore(OMARK-61): close the enumeration the OMARK-61 fix itself missed (#125)
 - 2026-09-15T17:34:24-05:00 4deaf11a67bdb6764aea294819c340151fdf2ac2 chore(OMARK-62): record the comment-only wiring mutant (#127)
 - 2026-09-18T20:12:42-05:00 16fcf9763186b7ba88fc6d5f2fc18793470a09ef chore(OMARK-63): bump opum-lore federated pin to v0.8.0
+- 2026-09-18T20:16:07-05:00 e8ebf3d16f65b4329c2054a81530bff19a21a1a9 chore(OMARK-63): bump opum-lore federated pin to v0.8.0 (#136)
