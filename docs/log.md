@@ -10,3 +10,4 @@
 - 2026-09-15T17:19:25-05:00 65c3be97fd016e93b277a9301c3b1f88f249e697 fix(OMARK-60): pin the guard job's env wiring, print the interpreter (#121)
 - 2026-09-15T17:29:28-05:00 5c653626d5dcbada02b5153beda3ea647292c344 chore(OMARK-61): record the guard's wiring as proven, and bound the claim (#123)
 - 2026-09-15T17:31:46-05:00 064d292b972f61c2c0cc99b297c3ad7fb514bd19 chore(OMARK-61): close the enumeration the OMARK-61 fix itself missed (#125)
+- 2026-09-15T17:34:24-05:00 4deaf11a67bdb6764aea294819c340151fdf2ac2 chore(OMARK-62): record the comment-only wiring mutant (#127)
