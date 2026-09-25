@@ -249,6 +249,16 @@ jobs:
       - name: lore check
         run: lore check
 
+      # OMARK-67 (OPAG-378 AC4). The managed lore agent bridges (CLAUDE.md's
+      # managed block and the repo-mode .claude/skills/lore/SKILL.md) drift
+      # whenever the CLI's generator output changes underneath them, the same
+      # way the Quest managed block does above - and nothing enforced it until
+      # now. `lore agents --check` is the currency check the OPAG-378 carve-out
+      # names for this exact drift, installed at the same version lore check
+      # just ran with, so there is no second lore pin to fall out of sync.
+      - name: lore agents --check
+        run: lore agents --check
+
   # OPAG-79, fleet-wide. Two failure modes that both reach dev without any
   # commit here to blame for them:
   #
