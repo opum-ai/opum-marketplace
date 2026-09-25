@@ -1,0 +1,44 @@
+{
+  "name": "opum",
+  "plugins": [
+    {
+      "name": "opum-lore",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/opum-ai/lore-cli.git",
+        "ref": "v0.9.3"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "documentation"
+    },
+    {
+      "name": "opum-output-styles",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/opum-ai/opum-output-styles.git",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "productivity"
+    },
+    {
+      "name": "opum-quest",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/opum-ai/quest-cli.git",
+        "ref": "v0.10.0"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "workflow"
+    }
+  ]
+}

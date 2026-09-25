@@ -31,6 +31,35 @@ names. An index that lists a plugin which does not resolve is broken for
 everyone who adds the marketplace, so an entry is absent from
 `marketplace.json` until its target plugin exists at the pinned tag.
 
+## Two agent runtimes, one source of truth
+
+This repository serves both Claude Code and Codex CLI from the same three
+plugins, but the two runtimes read genuinely different manifest contracts —
+they are not two names for the same file. Claude Code resolves plugins from
+`.claude-plugin/marketplace.json`; Codex resolves plugins from
+`.agents/plugins/marketplace.json` alone, and only borrows the Claude
+manifest's top-level `name` for a display fallback. It does not read that
+file's `plugins` array at all, and each plugin entry's `source` shape differs
+between the two: Claude's `{source: "github", repo, ref}` has no meaning to
+Codex, which needs `{source: "url", url: "<full .git URL>", ref}` — an
+unrecognized `source.source` value is silently dropped from Codex's
+`available` list, with no error surfaced anywhere (confirmed empirically
+against codex-cli 0.155.1; OPAG-421).
+
+`.agents/plugins/marketplace.json` is therefore **generated**, never
+hand-edited: `scripts/generate-codex-marketplace.mjs` derives it from
+`.claude-plugin/marketplace.json`, and `node
+scripts/generate-codex-marketplace.mjs --check` is the CI gate (part of
+`check · manifests`) that fails the build if the two have drifted apart —
+the same "derive, don't duplicate, and verify in CI" shape
+[Federated pin verification](federated-pin-verification.md) already uses for
+a pinned tag's content.
+Neither CLI needs a `.codex-plugin/plugin.json` of its own: `codex plugin
+add` clones the pinned ref and reads the target repository's own
+`.claude-plugin/plugin.json` to resolve the installed version, matched
+against the marketplace entry's declared name — confirmed by installing
+`opum-lore` and `opum-quest` end to end from a clean, isolated `CODEX_HOME`.
+
 ## What changes here versus elsewhere
 
 - **A skill's own behaviour** (what `lore` or `quest` actually does) is a
