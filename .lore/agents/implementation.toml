@@ -1,0 +1,10 @@
+schema_version = 1
+name = "implementation"
+description = "Grounds a change to this repository in what actually changes here — the marketplace.json index, its federated pin baselines, and the CI gates that must stay green — versus what belongs in lore-cli or quest-cli instead."
+kind = "specialist"
+max_tokens = 10000
+pinned = ["reference/marketplace-federation-contract"]
+sources = [
+  "reference/federated-pin-verification",
+  "reference/sdlc-promotion-and-ci-gates",
+]

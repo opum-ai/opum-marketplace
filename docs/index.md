@@ -16,5 +16,5 @@ Add concepts under `docs/` and link them from here. This file is the bundle's
 entry point and the only one that carries `okf_version`.
 
 <!-- lore:index:begin -->
-
+- [reference](reference/index.md)
 <!-- lore:index:end -->
