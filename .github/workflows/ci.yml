@@ -64,6 +64,23 @@ jobs:
             console.log(`manifests OK (${named.length} plugin(s): ${named.join(", ")})`);
           '
 
+      # OPAG-421. Codex does not read .claude-plugin/marketplace.json's plugin
+      # entries at all - it resolves plugins from .agents/plugins/
+      # marketplace.json alone, in a different source shape ({source: "url",
+      # url: "<full .git URL>", ref} rather than Claude's {source: "github",
+      # repo, ref}) - and silently drops any entry it cannot parse, with no
+      # error anywhere. Hand-maintaining both files invites exactly the silent
+      # drift federated-pin-baselines.json already exists to prevent for a
+      # pinned tag's content, so the Codex manifest is generated from the
+      # Claude one instead of authored separately. Free, deterministic, no
+      # network - runs unconditionally so a regression in the generator is
+      # caught even on a push that touches neither manifest.
+      - name: Codex manifest generator has a passing regression test
+        run: node scripts/test/generate-codex-marketplace.test.mjs
+
+      - name: Codex manifest is current with the Claude one
+        run: node scripts/generate-codex-marketplace.mjs --check
+
       # Free, deterministic, no network: proves the checker two steps down
       # actually fails on the v0.4.3-shaped defect (ref names one version,
       # plugin.json declares another), against a local fixture server. Runs
