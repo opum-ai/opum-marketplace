@@ -1,0 +1,10 @@
+schema_version = 1
+name = "review"
+description = "Reviews a change against this repository's promotion and CI-gate contract — dev-to-main fast-forward, the three required checks, and the no-exemption SDLC rule — and against the federation boundary that says what belongs here versus lore-cli or quest-cli."
+kind = "specialist"
+max_tokens = 9000
+pinned = ["reference/sdlc-promotion-and-ci-gates"]
+sources = [
+  "reference/marketplace-federation-contract",
+  "reference/federated-pin-verification",
+]

@@ -1,0 +1,11 @@
+schema_version = 1
+name = "documentation"
+description = "Grounds authoring in this repository's docs bundle — its entry point, and the three reference concepts that carry this repository's real substance versus the fleet-wide operating instructions imported into CLAUDE.md."
+kind = "specialist"
+max_tokens = 8000
+pinned = ["index"]
+sources = [
+  "reference/marketplace-federation-contract",
+  "reference/federated-pin-verification",
+  "reference/sdlc-promotion-and-ci-gates",
+]
