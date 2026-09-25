@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "opum",
-  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, plus original Claude Code output styles.",
+  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, and proof-skills for formal verification with TLA+ and Lean.",
   "owner": {
     "name": "Opum AI",
     "url": "https://github.com/opum-ai"
@@ -48,6 +48,21 @@
       },
       "category": "workflow",
       "homepage": "https://github.com/opum-ai/quest-cli"
+    },
+    {
+      "name": "proof-skills",
+      "description": "Formal verification for real codebases: find concurrency, data-flow, state-management, and graph bugs with TLA+ and Lean 4, reproduce and fix them, simplify code with proofs, and publish results as Artifact reports.",
+      "author": {
+        "name": "Opum AI",
+        "url": "https://github.com/opum-ai"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/proof-skills",
+        "ref": "v0.1.1"
+      },
+      "category": "verification",
+      "homepage": "https://github.com/opum-ai/proof-skills"
     }
   ]
 }

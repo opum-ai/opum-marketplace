@@ -1,12 +1,15 @@
 # Opum Marketplace
 
 Opum's public Claude Code plugin index: federated entries for the `lore` and
-`quest` CLI skills.
+`quest` CLI skills, original Claude Code output styles, and proof-skills for
+formal verification with TLA+ and Lean.
 
 ```
 /plugin marketplace add opum-ai/opum-marketplace
 /plugin install opum-lore@opum
 /plugin install opum-quest@opum
+/plugin install opum-output-styles@opum
+/plugin install proof-skills@opum
 ```
 
 ## What is here
@@ -15,6 +18,8 @@ Opum's public Claude Code plugin index: federated entries for the `lore` and
 |---|---|---|
 | `opum-lore` | `opum-ai/lore-cli` | the `lore` skill, cut by the same tag as the CLI it describes |
 | `opum-quest` | `opum-ai/quest-cli` | the `quest` skill, cut by the same tag as the CLI it describes |
+| `opum-output-styles` | `opum-ai/opum-output-styles` | original Claude Code output styles, including "Show Your Checks" |
+| `proof-skills` | `opum-ai/proof-skills` | formal verification skills (TLA+, Lean 4) for finding, reproducing, and fixing concurrency and state bugs, cut by the same tag as the plugin it describes |
 
 ## Why the index is federated
 
@@ -30,8 +35,8 @@ than merely discouraged.
 A federated entry is added **in the same change that creates the plugin it names**.
 An index that lists a plugin which does not resolve is broken for everyone who
 adds the marketplace, so a federated entry is absent from `marketplace.json`
-until its plugin exists at the pinned tag. `opum-lore` and `opum-quest` both
-resolve now.
+until its plugin exists at the pinned tag. `opum-lore`, `opum-quest`,
+`opum-output-styles`, and `proof-skills` all resolve now.
 
 ## Contributing
 
