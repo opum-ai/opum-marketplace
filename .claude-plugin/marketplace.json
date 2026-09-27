@@ -1,12 +1,27 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "opum",
-  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, and proof-skills for formal verification with TLA+ and Lean.",
+  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, proof-skills for formal verification with TLA+ and Lean, and housekeeping-skills for safe project, git, and harness cleanup.",
   "owner": {
     "name": "Opum AI",
     "url": "https://github.com/opum-ai"
   },
   "plugins": [
+    {
+      "name": "housekeeping-skills",
+      "description": "Project housekeeping for agentic engineering at five levels, Minimal to Immaculate, within a session, repo, or machine scope: quest and lore sync, safe git landing and pruning with containment proofs, workspace, runtime and Claude Code harness cleanup, and a verified disposition for every in-scope item, through a fingerprinted plan/apply engine with safety classes and undo.",
+      "author": {
+        "name": "Opum AI",
+        "url": "https://github.com/opum-ai"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/housekeeping-skills",
+        "ref": "v0.1.0"
+      },
+      "category": "workflow",
+      "homepage": "https://github.com/opum-ai/housekeeping-skills"
+    },
     {
       "name": "opum-lore",
       "description": "Drive the lore CLI: author, retrieve, and maintain OKF documentation bundles, including explicit multi-repository workspaces. Federated: this entry pins the lore-cli release tag, so the skill is cut from the same tag as the CLI it describes and cannot drift from it.",
