@@ -19,6 +19,8 @@
 - 2026-09-25T07:52:27-05:00 d9811a073187acc2a3e49eca4264a5c07b28b9b8 chore(OMARK-71): close task with acceptance criteria and final summary (#158)
 - 2026-09-25T09:51:23-05:00 54691b37d0a1d6746c80945af477d21e245f26e6 feat(OMARK-72): serve opum-lore and opum-quest to Codex CLI (#160)
 - 2026-09-25T09:53:20-05:00 6352c51e7edd30badc1ef20c735d34bcc9ed7574 chore(OMARK-72): close task with acceptance criteria and final summary (#162)
+- 2026-09-27T00:11:51-05:00 a0d1d58840bcd48ac1f6e4b7aaee3291628334ab chore(OMARK-74): pin opum-lore and opum-quest at v0.11.0 (#166)
+- 2026-09-27T09:59:57-05:00 43328dd1644133c6ee55a0d5354ff7bc06032aaf feat(OMARK-76): add housekeeping-skills as a federated marketplace entry
 
 ## docs/reference
 
