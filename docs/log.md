@@ -18,3 +18,8 @@
 - 2026-09-25T07:49:50-05:00 34a38b42dcdfc5fd40fa7b9eb2688f0a2cee53a2 feat(OMARK-71): add .lore/agents/ specialist profiles (#156)
 - 2026-09-25T07:52:27-05:00 d9811a073187acc2a3e49eca4264a5c07b28b9b8 chore(OMARK-71): close task with acceptance criteria and final summary (#158)
 - 2026-09-25T09:51:23-05:00 54691b37d0a1d6746c80945af477d21e245f26e6 feat(OMARK-72): serve opum-lore and opum-quest to Codex CLI (#160)
+- 2026-09-25T09:53:20-05:00 6352c51e7edd30badc1ef20c735d34bcc9ed7574 chore(OMARK-72): close task with acceptance criteria and final summary (#162)
+
+## docs/reference
+
+- 2026-09-25T18:57:05-05:00 56fadd9dcecb30485173c53aa80161d69392e884 feat(OMARK-73): add proof-skills as a federated marketplace entry (#164)
