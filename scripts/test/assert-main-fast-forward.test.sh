@@ -95,6 +95,20 @@
 # all-zeros branch-creation path, or any failing branch against real Actions
 # inputs - those remain proven by the suite's fixtures only. A green promotion
 # run is not evidence that a RED one would have been reported correctly.
+#
+# OMARK-77: the report and the exit-code gate are no longer the last lines of
+# the file - they live in the EXIT trap's cleanup() (see there), the same path
+# the early-abort branch already used. Appended below the old gate, a check ran
+# uncounted: it could not fail the exit code, and an appended no() call (which
+# only echoes and returns 0) printed FAIL while the script exited 0 - a red
+# that reads as green, which is the shape this file exists to catch in the
+# guard it proves. Mirrors opum-doc ODOC-228, which measured the same defect
+# in its own copy of this file and proved the fix both ways; that PR recorded
+# its version as a deliberate divergence from this one, so adopting the same
+# shape here removes a divergence rather than adding one. One intended
+# difference from ODOC-228's diff: the environment line stays where it is
+# below (ODOC-216, taken as shipped) instead of moving into the verdict block
+# - a diagnostic's placement is cosmetic and no property depends on it.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -113,6 +127,28 @@ cleanup() {
     echo "Do NOT read the PASS lines above as a pass: cases after the abort never ran."
     exit "${rc:-1}"
   fi
+  # OMARK-77 (mirrors opum-doc ODOC-228): the report and the exit-code gate
+  # live HERE, in the trap, not as the physical last lines of the file. A trap
+  # fires exactly once, at whatever point the script actually ends, so this is
+  # the single code path for both the suite's intended end AND anything
+  # appended below it - the same way the branch above already is for an early
+  # abort. Position in the file no longer decides what "last" means; a
+  # mechanical position-based fix (e.g. "the gate must be the final
+  # statement") would just move the exploit to whatever is newly last.
+  #
+  # Gate on ($fail != 0) OR (rc != 0), not on $fail alone. $fail alone would
+  # let appended code that crashes on its own (non-zero exit, never reaching
+  # the harness's own no()) get silently swallowed into a green exit merely
+  # because nothing had yet incremented $fail - trading the original defect
+  # for a different silent one. rc alone is what the unfixed script
+  # effectively did: it is exactly what let an appended no() call (which
+  # itself returns 0, since it only echoes) report green while printing FAIL.
+  echo
+  echo "passed $pass, failed $fail"
+  if [ "$fail" -ne 0 ] || [ "$rc" -ne 0 ]; then
+    exit 1
+  fi
+  exit 0
 }
 trap cleanup EXIT
 # opum-doc ODOC-216, taken as shipped. This suite twice carried a WRITTEN claim
@@ -358,7 +394,10 @@ for pair in 'BEFORE_SHA:github.event.before' 'FORCED:github.event.forced'; do
   fi
 done
 
+# OMARK-77: this used to end with the report and `[ $fail -eq 0 ]` as the
+# physical last lines - anything appended after them ran uncounted and could
+# not fail the exit code. Both now live in cleanup() (see OMARK-77 there),
+# fired by the EXIT trap, so the verdict is computed from live state at
+# whatever point the script actually ends regardless of what follows this
+# line.
 verdict_reached=yes
-echo
-echo "passed $pass, failed $fail"
-[ $fail -eq 0 ]
