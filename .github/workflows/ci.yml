@@ -325,8 +325,26 @@ jobs:
       # Two separate steps on purpose: a combined one would report "tracker
       # integrity failed" without saying which of the two very different
       # problems it hit.
+      #
+      # The listing is redirected, never echoed (OMARK-80, from OPAG-971): a
+      # task record's text is untrusted input to the runner, which scans job
+      # output for workflow-command syntax, so a note quoting a line such as
+      # ##[error] - or carrying ::add-mask:: or ::stop-commands:: - would be
+      # parsed as a command instead of printed. lore-cli measured that shape at
+      # 846233e1: the job concluded success and still carried a failure-level
+      # annotation. The count is the positive control, so an empty or truncated
+      # read cannot pass as a clean silence, and `set -e` keeps the quest exit
+      # status gating the step.
       - name: Tracker reads cleanly
-        run: quest task list --json
+        run: |
+          set -euo pipefail
+          quest task list --json > "$RUNNER_TEMP/quest-task-list.json"
+          count=$(jq -er '.data | arrays | length' "$RUNNER_TEMP/quest-task-list.json")
+          if [ "$count" -eq 0 ]; then
+            echo "::error file=.quest/tasks::quest task list read 0 records; an empty read is not evidence the tracker is intact."
+            exit 1
+          fi
+          echo "read $count task record(s)"
 
       - name: Managed instructions are current
         run: quest agents --check --require-installed --target claude
