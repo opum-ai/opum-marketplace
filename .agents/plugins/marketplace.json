@@ -19,7 +19,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/opum-ai/lore-cli.git",
-        "ref": "v0.11.0"
+        "ref": "v0.12.0"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -45,7 +45,7 @@
       "source": {
         "source": "url",
         "url": "https://github.com/opum-ai/quest-cli.git",
-        "ref": "v0.11.0"
+        "ref": "v0.12.0"
       },
       "policy": {
         "installation": "AVAILABLE",
