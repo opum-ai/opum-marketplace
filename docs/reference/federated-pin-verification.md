@@ -22,10 +22,11 @@ consumer of this marketplace follows it without knowing it moved
 (OMARK-43/OMARK-44).
 
 `scripts/federated-pin-baselines.json` is the second check. It records each
-pinned entry's resolved `skills/` subtree SHA — not the tag name, the actual
-tree content the skill ships — and `scripts/check-federated-content.mjs`
-re-resolves the live tag's subtree SHA and compares it against the recorded
-baseline.
+pinned entry's resolved content subtree SHA, not the tag name — the actual
+tree content the plugin ships: `skills/` for the skill-shaped plugins,
+`.claude-plugin/` for `yaml-lsp`, which ships no skills directory.
+`scripts/check-federated-content.mjs` re-resolves the live tag's subtree SHA
+and compares it against the recorded baseline.
 
 ## The playbook for bumping a pin
 
@@ -34,8 +35,9 @@ Bumping `marketplace.json`'s pinned tag for an entry and updating
 
 1. Confirm the new tag's `plugin.json` declares the version being pinned
    (what `check · manifests`'s live-fetch step verifies).
-2. Re-verify the new tag's `skills/` subtree content is what you intend to
-   ship — read it, don't assume the version bump alone means the skill
+2. Re-verify the new tag's recorded subtree content (`skills/` for the
+   skill-shaped plugins, `.claude-plugin/` for `yaml-lsp`) is what you intend
+   to ship — read it, don't assume the version bump alone means the plugin
    content is right.
 3. Update `scripts/federated-pin-baselines.json` with the newly-resolved
    subtree SHA in the **same commit** as the pin bump.
@@ -47,8 +49,8 @@ existing at all, and it is deliberate friction, not a bug to route around.
 ## Why this also runs off-PR
 
 Because a tag can move with no change to this repository at all — someone
-force-pushes a new commit onto an existing tag in `lore-cli` or
-`quest-cli` — `check-federated-content.mjs` also runs daily and on every push
+force-pushes a new commit onto an existing tag in `lore-cli`, `quest-cli`, or
+`yaml-lsp` — `check-federated-content.mjs` also runs daily and on every push
 to `dev`/`main`, not only on PRs that touch `marketplace.json`. A PR-only
 trigger would miss exactly the attack or mistake the baseline file exists to
 catch: content moving under a pin nobody here touched.

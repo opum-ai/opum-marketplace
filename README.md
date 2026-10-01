@@ -2,8 +2,9 @@
 
 Opum's public Claude Code plugin index: federated entries for the `lore` and
 `quest` CLI skills, original Claude Code output styles, proof-skills for
-formal verification with TLA+ and Lean, and housekeeping-skills for safe
-project, git, and harness cleanup.
+formal verification with TLA+ and Lean, housekeeping-skills for safe
+project, git, and harness cleanup, and yaml-lsp for YAML language server
+support.
 
 ```
 /plugin marketplace add opum-ai/opum-marketplace
@@ -12,6 +13,7 @@ project, git, and harness cleanup.
 /plugin install opum-output-styles@opum
 /plugin install proof-skills@opum
 /plugin install housekeeping-skills@opum
+/plugin install yaml-lsp@opum
 ```
 
 ## What is here
@@ -23,6 +25,7 @@ project, git, and harness cleanup.
 | `opum-output-styles` | `opum-ai/opum-output-styles` | original Claude Code output styles, including "Show Your Checks" |
 | `proof-skills` | `opum-ai/proof-skills` | formal verification skills (TLA+, Lean 4) for finding, reproducing, and fixing concurrency and state bugs, cut by the same tag as the plugin it describes |
 | `housekeeping-skills` | `opum-ai/housekeeping-skills` | project housekeeping for agentic engineering at five levels (Minimal to Immaculate): quest and lore sync, safe git landing and pruning with containment proofs, workspace, runtime and Claude Code harness cleanup, through a plan/apply engine with safety classes and undo |
+| `yaml-lsp` | `opum-ai/yaml-lsp` | a YAML language server for Claude Code, powered by yaml-language-server: diagnostics, completions, hover, and validation for `.yaml` and `.yml`, pinned to the plugin's own release tag |
 
 ## Why the index is federated
 
@@ -39,8 +42,8 @@ A federated entry is added **in the same change that creates the plugin it names
 An index that lists a plugin which does not resolve is broken for everyone who
 adds the marketplace, so a federated entry is absent from `marketplace.json`
 until its plugin exists at the pinned tag. `opum-lore`, `opum-quest`,
-`opum-output-styles`, `proof-skills`, and `housekeeping-skills` all resolve
-now.
+`opum-output-styles`, `proof-skills`, `housekeeping-skills`, and `yaml-lsp` all
+resolve now.
 
 ## Contributing
 
