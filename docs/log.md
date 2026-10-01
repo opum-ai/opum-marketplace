@@ -23,6 +23,7 @@
 - 2026-09-27T09:59:57-05:00 43328dd1644133c6ee55a0d5354ff7bc06032aaf feat(OMARK-76): add housekeeping-skills as a federated marketplace entry
 - 2026-09-27T10:20:18-05:00 86aee66a6d487b8b71e48ef04e47e27f957dbf29 feat(OMARK-76): add housekeeping-skills as a federated marketplace entry (#174)
 - 2026-09-28T11:40:44-05:00 048bb8273efe70e3b21a7c8f65c6671d5ed1d54b chore(OMARK-77): file latent defect in assert-main-fast-forward.test.sh's report+gate (#175)
+- 2026-09-28T14:15:51-05:00 cd29874a00b805ef726426bd7c4ce9f7a4ba98fc fix(OMARK-77): compute the proof suite's verdict in the EXIT trap, not by file position (#176)
 
 ## docs/reference
 
