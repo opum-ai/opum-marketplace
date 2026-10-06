@@ -23,8 +23,10 @@ consumer of this marketplace follows it without knowing it moved
 
 `scripts/federated-pin-baselines.json` is the second check. It records each
 pinned entry's resolved content subtree SHA, not the tag name — the actual
-tree content the plugin ships: `skills/` for the skill-shaped plugins,
-`.claude-plugin/` for `yaml-lsp`, which ships no skills directory.
+tree content the plugin ships. That is `skills/` for the skill-shaped
+plugins, `output-styles/` for the output-style plugins such as
+`plain-english-styles`, and `.claude-plugin/` for `yaml-lsp`, which ships no
+skills directory and whose behaviour lives in its manifest.
 `scripts/check-federated-content.mjs` re-resolves the live tag's subtree SHA
 and compares it against the recorded baseline.
 
@@ -36,9 +38,10 @@ Bumping `marketplace.json`'s pinned tag for an entry and updating
 1. Confirm the new tag's `plugin.json` declares the version being pinned
    (what `check · manifests`'s live-fetch step verifies).
 2. Re-verify the new tag's recorded subtree content (`skills/` for the
-   skill-shaped plugins, `.claude-plugin/` for `yaml-lsp`) is what you intend
-   to ship — read it, don't assume the version bump alone means the plugin
-   content is right.
+   skill-shaped plugins, `output-styles/` for the output-style plugins such
+   as `plain-english-styles`, `.claude-plugin/` for `yaml-lsp`) is what you
+   intend to ship — read it, don't assume the version bump alone means the
+   plugin content is right.
 3. Update `scripts/federated-pin-baselines.json` with the newly-resolved
    subtree SHA in the **same commit** as the pin bump.
 
