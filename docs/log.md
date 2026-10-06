@@ -25,6 +25,7 @@
 - 2026-09-28T11:40:44-05:00 048bb8273efe70e3b21a7c8f65c6671d5ed1d54b chore(OMARK-77): file latent defect in assert-main-fast-forward.test.sh's report+gate (#175)
 - 2026-09-28T14:15:51-05:00 cd29874a00b805ef726426bd7c4ce9f7a4ba98fc fix(OMARK-77): compute the proof suite's verdict in the EXIT trap, not by file position (#176)
 - 2026-10-01T07:28:30-05:00 21a398fcafd10215a128da3ca6b700d61f179aee feat(OMARK-79): federate yaml-lsp, pinned to v0.1.0 (#190)
+- 2026-10-06T17:17:38-05:00 3a1d2a14cadcc068e3fd42384a80f8791e93a1d7 feat(OMARK-84): add diagram-skills as a federated marketplace entry (#197)
 
 ## docs/reference
 
