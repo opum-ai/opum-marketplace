@@ -10,13 +10,14 @@ generated:
 
 # Marketplace federation contract
 
-`opum-marketplace` is Opum's public Claude Code plugin index. It ships six
+`opum-marketplace` is Opum's public Claude Code plugin index. It ships seven
 entries — `opum-lore` (the `lore` skill), `opum-quest` (the `quest` skill),
-`opum-output-styles`, `proof-skills`, `housekeeping-skills`, and `yaml-lsp` —
-and owns no plugin content directly. `.claude-plugin/marketplace.json` is the
-whole product: each entry points at the repository that actually implements
-and ships the thing it names (`lore-cli` for `opum-lore`, `quest-cli` for
-`opum-quest`, and `opum-output-styles`, `proof-skills`, `housekeeping-skills`
+`opum-output-styles`, `diagram-skills`, `proof-skills`, `housekeeping-skills`,
+and `yaml-lsp` — and owns no plugin content directly.
+`.claude-plugin/marketplace.json` is the whole product: each entry points at
+the repository that actually implements and ships the thing it names
+(`lore-cli` for `opum-lore`, `quest-cli` for `opum-quest`, and
+`opum-output-styles`, `diagram-skills`, `proof-skills`, `housekeeping-skills`
 and `yaml-lsp` for the entries of the same name), pinned to a tag.
 
 ## Why federated, not vendored
@@ -35,7 +36,7 @@ everyone who adds the marketplace, so an entry is absent from
 
 ## Two agent runtimes, one source of truth
 
-This repository serves both Claude Code and Codex CLI from the same six
+This repository serves both Claude Code and Codex CLI from the same seven
 plugins, but the two runtimes read genuinely different manifest contracts —
 they are not two names for the same file. Claude Code resolves plugins from
 `.claude-plugin/marketplace.json`; Codex resolves plugins from

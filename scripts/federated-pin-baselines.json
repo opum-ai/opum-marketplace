@@ -26,6 +26,12 @@
     "this file. If a pin bump ever lands without its baseline moving, the checker fails",
     "on purpose rather than silently checking the wrong tag."
   ],
+  "diagram-skills": {
+    "ref": "v0.1.0",
+    "trees": { "skills": "8747c68d52f333ff074a9e72c9be09a6865fa8c8" },
+    "verifiedAt": "2026-10-06",
+    "note": "OMARK-84, dispatched by opum-agent (opum-doc DEC-168 (3)). First pin of a seventh entry -- diagram-skills is a new public repo, not a spin-off of an existing pin. Repo-root layout (.claude-plugin/ and skills/ directly at the root, no plugins/ subdirectory), so the existing github-source checkers and the Codex generator handle it without a code change, as OMARK-73 established for proof-skills. Tag chain resolved independently via the GitHub git-database API (git/ref/tags -> git/tags -> git/commits -> git/trees), the exact path check-federated-content.mjs walks: v0.1.0 is an ANNOTATED tag -> tag object 031d53bb5062b3d94cd77a523ee6ca855d7a0517 (type=tag) -> peels to commit 15469fd1fbc1f602508de6131778222f01385b5e -> root tree 136f92111bd2dfd478fd19f145f555a08ba57183 -> skills subtree 8747c68d52f333ff074a9e72c9be09a6865fa8c8, containing diagram-architecture, diagram-data, diagram-decision, diagram-plan, diagram-process, and diagram-review. .claude-plugin/plugin.json at the tag self-declares name diagram-skills, version 0.1.0, author {name: Opum AI, url: https://github.com/opum-ai}, license MIT -- confirmed by reading raw.githubusercontent.com/opum-ai/diagram-skills/v0.1.0/.claude-plugin/plugin.json, the same URL check-federated-pins.mjs fetches. Repository confirmed public (private: false) and MIT via the /license endpoint (spdx_id MIT). The default branch is dev, and its HEAD (3a613d874264e23522c279e55acfe2050c546430) is ahead of the tag: the pinned tag commit 15469fd1 is not the current branch tip, which is deliberate -- the entry pins the immutable release tag, never a moving branch."
+  },
   "opum-lore": {
     "ref": "v0.12.0",
     "trees": { "skills": "ce580cd17d1da6a61ddb53f649398719b9262f96" },
