@@ -1,12 +1,27 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "opum",
-  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, proof-skills for formal verification with TLA+ and Lean, housekeeping-skills for safe project, git, and harness cleanup, and yaml-lsp for YAML language server support.",
+  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, diagram-skills for explaining and diagramming architectures, processes, decisions, data and plans with Mermaid, proof-skills for formal verification with TLA+ and Lean, housekeeping-skills for safe project, git, and harness cleanup, and yaml-lsp for YAML language server support.",
   "owner": {
     "name": "Opum AI",
     "url": "https://github.com/opum-ai"
   },
   "plugins": [
+    {
+      "name": "diagram-skills",
+      "description": "Explain and diagram architectures, processes, decisions, data and plans: Mermaid in Markdown, pitched to the reader's level, drawn from real Quest and lore records, and checked for syntax, legibility, accessibility and truth.",
+      "author": {
+        "name": "Opum AI",
+        "url": "https://github.com/opum-ai"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/diagram-skills",
+        "ref": "v0.1.0"
+      },
+      "category": "documentation",
+      "homepage": "https://github.com/opum-ai/diagram-skills"
+    },
     {
       "name": "housekeeping-skills",
       "description": "Project housekeeping for agentic engineering at five levels, Minimal to Immaculate, within a session, repo, or machine scope: quest and lore sync, safe git landing and pruning with containment proofs, workspace, runtime and Claude Code harness cleanup, and a verified disposition for every in-scope item, through a fingerprinted plan/apply engine with safety classes and undo.",
