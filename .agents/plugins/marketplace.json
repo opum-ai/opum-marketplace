@@ -93,6 +93,19 @@
       "category": "verification"
     },
     {
+      "name": "test-skills",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/opum-ai/test-skills.git",
+        "ref": "v0.1.0"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "verification"
+    },
+    {
       "name": "yaml-lsp",
       "source": {
         "source": "url",
