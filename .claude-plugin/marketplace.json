@@ -60,7 +60,7 @@
       "source": {
         "source": "github",
         "repo": "opum-ai/opum-output-styles",
-        "ref": "main"
+        "ref": "v0.1.0"
       },
       "category": "productivity",
       "homepage": "https://github.com/opum-ai/opum-output-styles"
