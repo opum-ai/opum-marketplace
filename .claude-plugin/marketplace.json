@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "opum",
-  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, plain-english-styles for clear, jargon-free reporting built on ASD-STE100 Simplified Technical English, diagram-skills for explaining and diagramming architectures, processes, decisions, data and plans with Mermaid, proof-skills for formal verification with TLA+ and Lean, housekeeping-skills for safe project, git, and harness cleanup, and yaml-lsp for YAML language server support.",
+  "description": "Opum's public plugin index: federated entries for the lore and quest CLI skills, each cut from the same release tag as the CLI it describes, original Claude Code output styles, plain-english-styles for clear, jargon-free reporting built on ASD-STE100 Simplified Technical English, diagram-skills for explaining and diagramming architectures, processes, decisions, data and plans with Mermaid, test-skills for sustainable test suites with rigor profiles and CI gates, proof-skills for formal verification with TLA+ and Lean, housekeeping-skills for safe project, git, and harness cleanup, and yaml-lsp for YAML language server support.",
   "owner": {
     "name": "Opum AI",
     "url": "https://github.com/opum-ai"
@@ -108,6 +108,21 @@
       },
       "category": "verification",
       "homepage": "https://github.com/opum-ai/proof-skills"
+    },
+    {
+      "name": "test-skills",
+      "description": "Sustainable test suites for agentic engineering: a test constitution with rigor profiles (R1 Minimal to R5 High-Assurance), lean test planning, mutation-kill-matrix audits, certified test-suite reduction with probation, CI gates, and provable-coverage claims.",
+      "author": {
+        "name": "Opum AI",
+        "url": "https://github.com/opum-ai"
+      },
+      "source": {
+        "source": "github",
+        "repo": "opum-ai/test-skills",
+        "ref": "v0.1.0"
+      },
+      "category": "verification",
+      "homepage": "https://github.com/opum-ai/test-skills"
     },
     {
       "name": "yaml-lsp",
