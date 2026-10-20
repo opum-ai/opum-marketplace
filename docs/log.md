@@ -27,6 +27,7 @@
 - 2026-10-01T07:28:30-05:00 21a398fcafd10215a128da3ca6b700d61f179aee feat(OMARK-79): federate yaml-lsp, pinned to v0.1.0 (#190)
 - 2026-10-06T17:17:38-05:00 3a1d2a14cadcc068e3fd42384a80f8791e93a1d7 feat(OMARK-84): add diagram-skills as a federated marketplace entry (#197)
 - 2026-10-06T17:56:18-05:00 6941f01c6b37b551c7692292e3983ab453ba8370 feat(OMARK-85): add plain-english-styles as a federated marketplace entry (#199)
+- 2026-10-07T11:52:18-05:00 ee1215cf52deffd00fd480cf89564005f685f849 chore(OMARK-86): bump opum-lore and opum-quest pins to v0.13.0 (LCLI-469 paired release) (#201)
 
 ## docs/reference
 
