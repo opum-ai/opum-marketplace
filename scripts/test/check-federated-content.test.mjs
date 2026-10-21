@@ -107,6 +107,19 @@ try {
     ? ok('a tag repointed at different skill content is caught, naming both SHAs')
     : bad(`repointed tag not caught: ${JSON.stringify(problems)}`);
 
+  // Both shapes of "nothing to compare": a missing trees key and an empty one. The checker must
+  // fail on each, and still pass the same entry when a tree is recorded (the first case above).
+  for (const [shape, trees] of [['an empty trees object', { trees: {} }], ['no trees key', {}]]) {
+    problems = await problemsOf(
+      { plugins: [entry('steady', 'opum-ai/steady-cli')] },
+      { steady: { ref: 'v1.0.0', ...trees } },
+      api,
+    );
+    problems.length === 1 && /records no trees/.test(problems[0])
+      ? ok(`a baseline with ${shape} fails instead of counting as verified`)
+      : bad(`${shape} not caught: ${JSON.stringify(problems)}`);
+  }
+
   problems = await problemsOf(
     { plugins: [entry('steady', 'opum-ai/steady-cli')] },
     baselineFor('steady', 'v0.9.0'),

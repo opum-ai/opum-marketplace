@@ -101,7 +101,13 @@ export async function checkEntry(p, baselines, apiBase = DEFAULT_API_BASE) {
     return `${p.name}: pin moved to ${s.ref} but the recorded baseline is still for ${baseline.ref}. Re-verify the new tag's skills/ content and update scripts/federated-pin-baselines.json in the same change that moves the pin.`;
   }
 
-  for (const [subtree, expected] of Object.entries(baseline.trees || {})) {
+  // A baseline with no trees compares nothing, and an entry that compared nothing would still
+  // be counted as verified (OMARK-96, OMARK-93 review NIT 5).
+  const trees = Object.entries(baseline.trees || {});
+  if (trees.length === 0) {
+    return `${p.name}: the baseline for ${s.ref} records no trees, so nothing would be compared and the entry would still read as verified. Record at least the skills/ subtree SHA in scripts/federated-pin-baselines.json.`;
+  }
+  for (const [subtree, expected] of trees) {
     const got = await resolveSubtree(apiBase, s.repo, s.ref, subtree);
     if (got.error) return `${p.name}: ${got.error}`;
     if (got.sha !== expected) {
