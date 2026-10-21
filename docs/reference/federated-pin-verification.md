@@ -49,6 +49,24 @@ Skipping step 3 fails the content check on purpose, rather than silently
 passing against the wrong tag — that is the point of the baseline file
 existing at all, and it is deliberate friction, not a bug to route around.
 
+### What the acceptance criterion asks for as proof (DEC-227)
+
+The checker has no control mode: `checkEntry` rejects any baseline whose ref is
+not the pin, so a live resolve of a different tag cannot run in the same
+invocation, and none is built (DEC-227 declined it). A pin-bump task's
+acceptance criterion asks for two things instead:
+
+1. The `scripts/test/check-federated-content.test.mjs` run. Its repointed-tag
+   case is the mismatch proof: it shows the checker catches a tag that
+   resolves to different content.
+2. The live run's summary line on that same change, quoted, naming the bumped
+   entry among those "resolved and matched their baseline". That is the
+   in-invocation evidence the run actually read the bumped entry, rather than
+   reaching `NOTHING WAS RESOLVED` or skipping it as out of scope.
+
+A baseline that records no trees is itself refused (OMARK-96), so an entry
+cannot read as verified with nothing compared.
+
 ## Why this also runs off-PR
 
 Because a tag can move with no change to this repository at all — someone
