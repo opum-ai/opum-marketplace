@@ -6,7 +6,8 @@ for clear, jargon-free reporting built on Simplified Technical English,
 diagram-skills for explaining and diagramming architectures, processes,
 decisions, data and plans with Mermaid, proof-skills for formal verification
 with TLA+ and Lean, housekeeping-skills for safe project, git, and harness
-cleanup, and yaml-lsp for YAML language server support.
+cleanup, test-skills for sustainable test suites with rigor profiles and CI
+gates, and yaml-lsp for YAML language server support.
 
 ```
 /plugin marketplace add opum-ai/opum-marketplace
@@ -17,6 +18,7 @@ cleanup, and yaml-lsp for YAML language server support.
 /plugin install diagram-skills@opum
 /plugin install proof-skills@opum
 /plugin install housekeeping-skills@opum
+/plugin install test-skills@opum
 /plugin install yaml-lsp@opum
 ```
 
@@ -31,6 +33,7 @@ cleanup, and yaml-lsp for YAML language server support.
 | `diagram-skills` | `opum-ai/diagram-skills` | explain and diagram architectures, processes, decisions, data and plans with Mermaid in Markdown, pitched to the reader's level and checked for syntax, legibility, accessibility and truth |
 | `proof-skills` | `opum-ai/proof-skills` | formal verification skills (TLA+, Lean 4) for finding, reproducing, and fixing concurrency and state bugs, cut by the same tag as the plugin it describes |
 | `housekeeping-skills` | `opum-ai/housekeeping-skills` | project housekeeping for agentic engineering at five levels (Minimal to Immaculate): quest and lore sync, safe git landing and pruning with containment proofs, workspace, runtime and Claude Code harness cleanup, through a plan/apply engine with safety classes and undo |
+| `test-skills` | `opum-ai/test-skills` | sustainable test suites for agentic engineering: a test constitution with rigor profiles (R1 Minimal to R5 High-Assurance), lean test planning, mutation-kill-matrix audits, certified test-suite reduction with probation, CI gates and provable-coverage claims |
 | `yaml-lsp` | `opum-ai/yaml-lsp` | a YAML language server for Claude Code, powered by yaml-language-server: diagnostics, completions, hover, and validation for `.yaml` and `.yml`, pinned to the plugin's own release tag |
 
 ## Why the index is federated
@@ -49,7 +52,7 @@ An index that lists a plugin which does not resolve is broken for everyone who
 adds the marketplace, so a federated entry is absent from `marketplace.json`
 until its plugin exists at the pinned tag. `opum-lore`, `opum-quest`,
 `opum-output-styles`, `plain-english-styles`, `diagram-skills`, `proof-skills`,
-`housekeeping-skills`, and `yaml-lsp` all resolve now.
+`housekeeping-skills`, `test-skills`, and `yaml-lsp` all resolve now.
 
 ## Contributing
 
