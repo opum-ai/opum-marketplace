@@ -219,7 +219,7 @@ push() { git -C "$S/work" push -q ${2:-} origin "${1}:refs/heads/main"; }
 run() {
   local label="$1" sha="$2" before="$3" forced="$4" want="$5" shallow="$6"; shift 6
   rm -rf "$S/ci"
-  if [ "$shallow" = yes ]; then
+  if [ "$shallow" = yes ] || [ "$shallow" = shallowdev ]; then
     # PRODUCTION SHAPE, and getting this wrong hid a real defect. actions/checkout
     # on a push to main with the default depth produces a SHALLOW, SINGLE-BRANCH
     # clone of MAIN - so remote.origin.fetch covers only main and `origin/dev`
@@ -243,6 +243,13 @@ run() {
     # shallow is a test case that disables itself while still passing, so this
     # asserts the precondition and FAILS rather than skipping.
     git clone -q --depth 1 "file://$S/origin" --branch main "$S/ci" 2>/dev/null
+    # OMARK-101: the guard no longer fetches dev, so `shallowdev` is the fixture for
+    # a shallow clone that nonetheless HOLDS origin/dev. It supplies the ref the way
+    # a checkout would, from the fixture side, so the guard reaches the
+    # previous-HEAD test and that site's shallow diagnosis stays covered.
+    if [ "$shallow" = shallowdev ]; then
+      git -C "$S/ci" fetch -q --depth 1 "file://$S/origin" '+refs/heads/dev:refs/remotes/origin/dev' 2>/dev/null
+    fi
     if [ "$(git -C "$S/ci" rev-parse --is-shallow-repository)" != "true" ]; then
       no "$label (FIXTURE BROKEN: clone is not shallow, so this case measures nothing)" 0 ""
       return
@@ -299,7 +306,12 @@ run "a full clone that cannot resolve the previous HEAD blames a rewrite" "$C4" 
 # only asserting the other stem's absence can tell them apart. Found by opum-doc
 # (ODOC-211) running this suite verbatim; see the mutation reading in the header
 # for why our own notes had misdiagnosed it as a fixture artifact.
-run "a SHALLOW checkout blames the workflow, not the branch" "$C4" "$C2" false red yes =1 +"::error::" +"THIS CHECKOUT IS SHALLOW" +"fetch-depth: 0" -"rewrite orphaned" -"the fetch reported success but origin/dev still does not resolve"
+# OMARK-101: with no fetch of its own, a shallow single-branch checkout (no
+# origin/dev) now stops at the NAMED dev check, one step before the previous-HEAD
+# test. Two rows, one per site, each asserting its own sentence stem and the
+# ABSENCE of the other's, so neither can be answered by the other's message.
+run "a SHALLOW checkout with no origin/dev blames the workflow at the dev check" "$C4" "$C2" false red yes =1 +"::error::" +"refs/remotes/origin/dev is missing, and THIS CHECKOUT IS SHALLOW" +"fetch-depth: 0" -"rewrite orphaned" -"previous HEAD"
+run "a SHALLOW checkout that holds dev blames the workflow at the previous-HEAD test" "$C4" "$C2" false red shallowdev =1 +"::error::" +"THIS CHECKOUT IS SHALLOW, so main's previous HEAD" +"fetch-depth: 0" -"rewrite orphaned" -"refs/remotes/origin/dev is missing"
 rm -rf "$S/ci"; git clone -q "$S/origin" "$S/ci" 2>/dev/null; git -C "$S/ci" checkout -q "$C4"
 out=$( cd "$S/ci" && BEFORE_SHA="" FORCED=false bash "$GUARD" 2>&1 ); rc=$?
 [ $rc -ne 0 ] && ok "refuses to report at all when BEFORE_SHA is unset" || no "unset BEFORE_SHA passed" "$rc" "$out"
@@ -328,20 +340,21 @@ if [ "$rc" = 1 ] && grep -qF -- "::error::" <<<"$out" \
 else
   no "dev missing from the remote" "$rc" "$out"
 fi
-# Separate row from the one above, so a failure names WHICH property broke: the
-# verdict can be right while the content is lossy, which is exactly what the
-# 2>/dev/null defect was. Asserted on "git said: fatal:" and NOT on "git said:"
-# alone - the stem is a constant this script prints unconditionally, so it is
-# satisfied by an EMPTY capture and would pass against the suppressed form. That
-# is the satisfied-by-silence shape one layer in, on a POSITIVE assertion rather
-# than a negative one. opum-doc (ODOC-211) shipped this fix and its assertion
-# first; OMARK-58 had recorded the defect and prescribed it without applying it.
-if grep -qF -- "git said: fatal:" <<<"$out"; then
-  ok "the fetch failure quotes git verbatim rather than only this script's paraphrase"
+# OMARK-101: the guard makes no fetch, so there is no git error text to quote and
+# the old "quotes git verbatim" row is gone with the 2>/dev/null it guarded. Two
+# rows replace it. The message must NAME the ref it could not find, and the script
+# must contain no `git fetch` at all (comment lines stripped, so the explanation of
+# why there is none cannot satisfy or trip the assertion).
+if grep -qF -- "refs/remotes/origin/dev is missing from this clone" <<<"$out"; then
+  ok "a missing origin/dev names the ref it could not find"
 else
-  no "fetch failure discards git's own text (2>/dev/null on a FAILURE-typed exit)" "$rc" "$out"
+  no "missing origin/dev does not name refs/remotes/origin/dev" "$rc" "$out"
 fi
-
+if sed 's/#.*//' "$GUARD" | grep -q 'git fetch'; then
+  no "the guard contains a git fetch (DEC-240 (a2) decision: it takes origin/dev from the checkout)" 1 "$(sed 's/#.*//' "$GUARD" | grep 'git fetch')"
+else
+  ok "the guard makes no fetch of its own (comments stripped)"
+fi
 
 echo "workflow wiring (static)"
 # lore-web's instruction-versus-explanation trap: the job's own COMMENT names
@@ -393,6 +406,18 @@ for pair in 'BEFORE_SHA:github.event.before' 'FORCED:github.event.forced'; do
     no "$var is not wired to $expr in the guard job" 1 "$depth"
   fi
 done
+
+# OMARK-101: the guard job takes no token and the checkout persists none. Read from
+# $depth, which is job-scoped and comment-stripped, for the reason given above.
+grep -qE '^\s*persist-credentials:\s*false\s*$' <<<"$depth" \
+  && ok "the guard job's checkout sets persist-credentials: false" \
+  || no "persist-credentials: false missing from the guard job" 1 "$depth"
+grep -q 'DEV_FETCH_TOKEN\|secrets\.GITHUB_TOKEN' <<<"$depth" \
+  && no "the guard job still passes a token" 1 "$depth" \
+  || ok "the guard job passes no token (the guard reads origin/dev from the checkout)"
+grep -q 'scripts/ci/assert-no-persisted-credential.sh' <<<"$depth" \
+  && ok "the guard job reads the checkout's credential state" \
+  || no "the guard job does not run assert-no-persisted-credential.sh" 1 "$depth"
 
 # OMARK-77: this used to end with the report and `[ $fail -eq 0 ]` as the
 # physical last lines - anything appended after them ran uncounted and could

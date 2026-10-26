@@ -50,30 +50,50 @@ function runText(step) {
   return out.join('\n');
 }
 
+// Shell continuation lines are one command: join them before any rule reads a
+// line, or `npm install \\\n  -g pkg` hides its -g on the next physical line.
+const joinContinuations = (t) => t.replace(/\\\n\s*/g, ' ');
+
+const NPM_CMD = /(^|[\s;&|(])(npm\s+(install|i|add|ci|exec|x)\b|npx\b)/;
+
 export function violations(file, text) {
   const v = [];
-  for (const s of steps(text)) {
+  const all = steps(text);
+  all.forEach((s, idx) => {
     const body = s.lines.join('\n');
-    const run = runText(s);
-    // Item 2: every checkout opts out of persisting the token.
-    if (/uses:\s*actions\/checkout@/.test(body) && !/persist-credentials:\s*false\b/.test(body)) {
-      v.push(`${file}:${s.line}: actions/checkout does not set persist-credentials: false`);
+    const run = joinContinuations(runText(s));
+    // Item 2: every checkout opts out of persisting the token...
+    if (/uses:\s*actions\/checkout@/.test(body)) {
+      if (!/persist-credentials:\s*false\b/.test(body)) {
+        v.push(`${file}:${s.line}: actions/checkout does not set persist-credentials: false`);
+      }
+      // ...and the result is READ right after, not trusted.
+      const next = all[idx + 1];
+      if (!next || !runText(next).includes('scripts/ci/assert-no-persisted-credential.sh')) {
+        v.push(`${file}:${s.line}: the step after actions/checkout does not run scripts/ci/assert-no-persisted-credential.sh`);
+      }
     }
     // Item 4: nothing is interpolated into a shell body.
     if (run.includes('${{')) {
       v.push(`${file}:${s.line}: a \${{ }} expression is interpolated inside run: (pass it through env:)`);
     }
-    // Item 1: a global npm install must not run dependency lifecycle scripts.
+    // Item 1: any npm install/ci/exec or npx, global or not, must not run dependency
+    // lifecycle scripts.
     for (const ln of run.split('\n')) {
-      if (/\bnpm\s+(install|i|add)\b/.test(ln) && /(^|\s)-g\b|--global\b/.test(ln) && !/--ignore-scripts\b/.test(ln)) {
-        v.push(`${file}:${s.line}: npm global install without --ignore-scripts: ${ln.trim()}`);
+      if (NPM_CMD.test(ln) && !/--ignore-scripts\b/.test(ln)) {
+        v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${ln.trim()}`);
       }
     }
-    // Item 3: the Quest version is read by the one bounded script, not by sed.
-    if (/Quest CLI/.test(run) && /\bsed\b/.test(run)) {
-      v.push(`${file}:${s.line}: Quest version read by sed; use scripts/ci/read-quest-version.sh`);
+    // Item 3: the Quest version is read by the one bounded script and by nothing
+    // else. Any run that names the declaring phrase, or reads CLAUDE.md without
+    // going through that script, is a second reader (sed, grep, awk, perl, cut...).
+    if (/Quest CLI/.test(run)) {
+      v.push(`${file}:${s.line}: a run: body names the 'Quest CLI' declaring phrase; use scripts/ci/read-quest-version.sh`);
     }
-  }
+    if (/CLAUDE\.md/.test(run) && !/scripts\/ci\/read-quest-version\.sh/.test(run)) {
+      v.push(`${file}:${s.line}: a run: body reads CLAUDE.md without scripts/ci/read-quest-version.sh`);
+    }
+  });
   return v;
 }
 
@@ -83,40 +103,58 @@ const no = (m, d) => { fail++; console.log(`  FAIL ${m}`); if (d) console.log(` 
 
 // --- the real workflows are clean, and we really read them ----------------
 const files = readdirSync(wfDir).filter((f) => f.endsWith('.yml')).sort();
-let stepCount = 0, checkouts = 0, installs = 0, runBlocks = 0;
+let stepCount = 0, checkouts = 0, installs = 0, runBlocks = 0, readers = 0;
 for (const f of files) {
   const text = readFileSync(path.join(wfDir, f), 'utf8');
   for (const s of steps(text)) {
     stepCount++;
+    const rt = joinContinuations(runText(s));
     if (/uses:\s*actions\/checkout@/.test(s.lines.join('\n'))) checkouts++;
-    if (runText(s)) runBlocks++;
-    if (/npm\s+install\b.*-g/.test(runText(s))) installs++;
+    if (rt) runBlocks++;
+    if (NPM_CMD.test(rt)) installs++;
+    if (rt.includes('scripts/ci/read-quest-version.sh')) readers++;
   }
   const v = violations(f, text);
   v.length === 0 ? ok(`${f}: no hardening violations`) : v.forEach((x) => no(x));
 }
 // Positive control: a reader that found nothing would also report no violations.
-stepCount >= 20 ? ok(`read ${stepCount} steps across ${files.length} workflows`) : no(`read only ${stepCount} steps; the reader is not seeing the workflows`);
+stepCount >= 25 ? ok(`read ${stepCount} steps across ${files.length} workflows`) : no(`read only ${stepCount} steps; the reader is not seeing the workflows`);
 checkouts === 4 ? ok('found all 4 actions/checkout steps') : no(`expected 4 checkout steps, found ${checkouts}`);
-installs === 2 ? ok('found both global npm install steps') : no(`expected 2 global npm installs, found ${installs}`);
+installs === 2 ? ok('found both npm install steps') : no(`expected 2 npm install steps, found ${installs}`);
+readers === 2 ? ok('both Quest-version steps go through read-quest-version.sh') : no(`expected 2 steps using read-quest-version.sh, found ${readers}`);
 runBlocks >= 10 ? ok(`read ${runBlocks} run: bodies`) : no(`read only ${runBlocks} run: bodies`);
 
 // --- each rule rejects its own bad fixture --------------------------------
+const CHECK = '      - name: c\n        run: bash scripts/ci/assert-no-persisted-credential.sh\n';
+const CO = '      - uses: actions/checkout@v4\n        with:\n          persist-credentials: false\n';
+const wrap = (steps) => `jobs:\n  a:\n    steps:\n${steps}`;
 const bad = {
-  'checkout without persist-credentials: false': ['persist-credentials', `jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n`],
-  'a ${{ }} inside run:': ['interpolated inside run', `jobs:\n  a:\n    steps:\n      - name: x\n        run: |\n          echo "\${{ github.base_ref }}"\n`],
-  'a single-line run: with ${{ }}': ['interpolated inside run', `jobs:\n  a:\n    steps:\n      - run: npm install -g --ignore-scripts "x@\${{ steps.q.outputs.version }}"\n`],
-  'npm install -g without --ignore-scripts': ['without --ignore-scripts', `jobs:\n  a:\n    steps:\n      - name: i\n        env:\n          V: 1\n        run: npm install -g "@opum-ai/quest@$V"\n`],
-  'Quest version read by sed': ['read by sed', `jobs:\n  a:\n    steps:\n      - name: q\n        run: |\n          v="$(sed -n 's/.*Quest CLI \\([0-9.]*\\).*/\\1/p' CLAUDE.md)"\n`],
+  'checkout without persist-credentials: false': ['persist-credentials', wrap('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n' + CHECK)],
+  'checkout not followed by the credential check': ['does not run scripts/ci/assert-no-persisted-credential.sh', wrap(CO + '      - name: x\n        run: echo hi\n')],
+  'checkout as the last step (no step after)': ['does not run scripts/ci/assert-no-persisted-credential.sh', wrap(CO)],
+  'a ${{ }} inside run:': ['interpolated inside run', wrap('      - name: x\n        run: |\n          echo "${{ github.base_ref }}"\n')],
+  'a single-line run: with ${{ }}': ['interpolated inside run', wrap('      - run: npm install -g --ignore-scripts "x@${{ steps.q.outputs.version }}"\n')],
+  'npm install -g without --ignore-scripts': ['without --ignore-scripts', wrap('      - name: i\n        env:\n          V: 1\n        run: npm install -g "@opum-ai/quest@$V"\n')],
+  'a backslash-continued npm install -g without --ignore-scripts': ['without --ignore-scripts', wrap('      - name: i\n        run: |\n          npm install \\\n            -g "x@1.2.3"\n')],
+  'npx': ['without --ignore-scripts', wrap('      - name: i\n        run: npx some-tool\n')],
+  'npm exec': ['without --ignore-scripts', wrap('      - name: i\n        run: npm exec some-tool\n')],
+  'a non-global npm ci': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci\n')],
+  'Quest version read by sed': ['names the', wrap("      - name: q\n        run: |\n          v=\"$(sed -n 's/.*Quest CLI \\([0-9.]*\\).*/\\1/p' CLAUDE.md)\"\n")],
+  'Quest version read by grep (not sed)': ['reads CLAUDE.md without', wrap("      - name: q\n        run: v=\"$(grep -o '[0-9][0-9.]*' CLAUDE.md | head -1)\"\n")],
+  'Quest version read by awk naming the phrase': ['names the', wrap("      - name: q\n        run: awk '/Quest CLI/ {print $4}' x\n")],
 };
 for (const [label, [needle, text]] of Object.entries(bad)) {
   const v = violations('fixture.yml', text);
   v.some((x) => x.includes(needle)) ? ok(`rejects: ${label}`) : no(`did NOT reject: ${label}`, JSON.stringify(v));
 }
-// And the matching good fixture passes, so the rejections are not blanket.
-const good = `jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          persist-credentials: false\n      - name: i\n        env:\n          V: \${{ steps.q.outputs.version }}\n        run: npm install -g --ignore-scripts "x@$V"\n`;
+// And a matching good fixture passes, so the rejections are not blanket.
+const good = wrap(CO + CHECK + '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: npm install -g --ignore-scripts "x@$V"\n      - name: q\n        run: v="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"\n');
 violations('good.yml', good).length === 0 ? ok('accepts a compliant fixture') : no('rejected a compliant fixture', JSON.stringify(violations('good.yml', good)));
+// A backslash-continued install WITH the flag on the continuation line passes: the
+// join must not turn a compliant command into a violation.
+const goodCont = wrap(CO + CHECK + '      - name: i\n        run: |\n          npm install \\\n            -g --ignore-scripts "x@1.2.3"\n');
+violations('goodcont.yml', goodCont).length === 0 ? ok('accepts a compliant backslash-continued install') : no('rejected a compliant continued install', JSON.stringify(violations('goodcont.yml', goodCont)));
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 12) { console.log('ran fewer than the 12 expected passing cases'); process.exit(1); }
+if (pass < 22) { console.log('ran fewer than the 22 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);

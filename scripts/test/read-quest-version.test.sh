@@ -59,7 +59,22 @@ check 'no version line inside the block fails by name' "$S/noline.md" 1 "no 'Que
 { block 'This project uses Quest CLI 0.14.1 for tracker operations.'; block 'This project uses Quest CLI 0.13.0 for tracker operations.'; } > "$S/dup.md"
 check 'two blocks fail by name' "$S/dup.md" 1 "expected exactly one"
 printf '%s\n%s\n' "$END" "$BEGIN" > "$S/swapped.md"
-check 'markers out of order fail by name' "$S/swapped.md" 1 "empty or its markers are out of order"
+check 'markers out of order fail by name' "$S/swapped.md" 1 "markers are out of order"
+# The dangerous swap: end first, begin second, with a VALID version line after the
+# begin marker. Counting markers passes this (one of each), and a read from the
+# line after begin would return 0.14.1 from outside any block (Opus M1).
+printf '%s\n%s\n%s\n' "$END" "$BEGIN" 'This project uses Quest CLI 0.14.1 for tracker operations.' > "$S/swapped-version.md"
+check 'swapped markers WITH a version line after begin fail by name' "$S/swapped-version.md" 1 "markers are out of order"
+out="$(bash "$READER" "$S/swapped-version.md" 2>/dev/null)"
+[ -z "$out" ] && ok 'the swapped fixture printed no version on stdout' || no 'the swapped fixture printed a version' 0 "$out"
+
+# Two declaring lines inside one block are ambiguous, not "take the first".
+block "$(printf 'This project uses Quest CLI 0.14.1 for tracker operations.\nAlso Quest CLI 0.13.0 for tracker operations.')" > "$S/twolines.md"
+check 'two version lines in the block fail by name' "$S/twolines.md" 1 "declare a Quest CLI version; exactly one is expected"
+
+# CRLF is named as the cause, not reported as missing markers.
+block 'This project uses Quest CLI 0.14.1 for tracker operations.' | sed 's/$/\r/' > "$S/crlf.md"
+check 'CRLF line endings are named as the cause' "$S/crlf.md" 1 "carriage returns (CRLF line endings)"
 check 'missing file fails by name' "$S/does-not-exist.md" 1 "does not exist"
 
 # 5. the repository's real CLAUDE.md must read cleanly: a positive control that
@@ -70,5 +85,5 @@ if [ "$rc" -eq 0 ] && [[ "$live" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then ok "live C
 echo
 echo "passed $pass, failed $fail"
 # A suite that ran fewer cases than it was written for must not pass.
-[ "$pass" -ge 13 ] || { echo "ran fewer than the 13 expected passing cases"; exit 1; }
+[ "$pass" -ge 17 ] || { echo "ran fewer than the 17 expected passing cases"; exit 1; }
 [ "$fail" -eq 0 ]

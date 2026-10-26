@@ -40,6 +40,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # Read the result rather than trust the request: fails by name if the
+      # checkout left an extraheader in .git/config.
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
+      # setup-node 24, the same toolchain the lore-check and tracker jobs install
+      # with, so the --ignore-scripts proof below runs on the npm CI really uses
+      # for those installs (Opus M3: it first ran on the runner's default npm).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Manifests are valid JSON and each entry is well-formed
         run: |
           set -euo pipefail
@@ -133,8 +143,8 @@ jobs:
       # shim, so an unrelated PR cannot fail on a GitHub outage here.
       - name: Quest version reader rejects partial and out-of-block versions
         run: bash scripts/test/read-quest-version.test.sh
-      - name: Guard hands its token to one fetch through git environment config only
-        run: bash scripts/test/assert-main-fast-forward-token.test.sh
+      - name: Persisted-credential check fails by name and never prints the value
+        run: bash scripts/test/assert-no-persisted-credential.test.sh
       - name: npm install --ignore-scripts survives a failing dependency postinstall
         run: bash scripts/test/install-ignore-scripts.test.sh
       - name: Workflows keep persist-credentials off, env-only expressions and --ignore-scripts
@@ -253,6 +263,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -268,7 +280,7 @@ jobs:
             process.stdout.write(e.source.ref || "");
           ')"
           version="${ref#v}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error file=.claude-plugin/marketplace.json::opum-lore pin '$ref' is not a release tag, so there is no lore version to install for lore check."
             exit 1
           fi
@@ -332,6 +344,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
       # A literal version, not node-version-file: this repository owns no JS
       # project, so it has neither .nvmrc nor package.json to read one from.
       # 24 matches the toolchain the fleet develops against.

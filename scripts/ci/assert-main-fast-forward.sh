@@ -25,61 +25,31 @@ ZERO=0000000000000000000000000000000000000000
 before="${BEFORE_SHA:?BEFORE_SHA not set - refusing to report on an unmeasured previous position}"
 forced="${FORCED:-false}"
 
-# Explicit refspec (quest-web QWEB-46): bare `git fetch origin dev` relies on
-# git's opportunistic remote-tracking update, which works under actions/checkout's
-# narrowed refspec but is not guaranteed by it. Nothing asserted that; this does.
-# EVERY site that reports a missing git object needs the same two-causes split
-# (quest-cli). Fixing it only where the defect was first reported is the easiest
-# kind of under-application, and this site executes one step BEFORE the one that
-# was fixed - so execution never reaches that diagnosis. Measured before fixing:
-# with dev absent from the remote, the bare fetch exited 128 with ZERO ::error::
-# annotations, which is the same unannotated-crash failure the shallow split
-# exists to prevent.
+# OMARK-101 (DEC-240 item 2 and (a2)): NO FETCH OF ITS OWN. The workflow's checkout
+# runs with persist-credentials: false and fetch-depth: 0, and fetch-depth: 0
+# fetches every branch, so refs/remotes/origin/dev is already in the clone. This
+# script takes dev from there. An earlier version re-fetched dev here with the
+# checkout's token; with the token no longer persisted that fetch would need a
+# credential injected into one command, and this repository is public, so the
+# fetch is simply not needed (opum-agent, lore-web, quest-web, opum-web and
+# opum-cli-e2e made the same choice). The decision was the leader's, 2026-10-26.
 #
-# A wrapper that paraphrases a tool's error owes the operator the original, and
-# the sites where that matters are exactly the sites where a non-zero exit means
-# FAILURE rather than ANSWER - a typing distinction, so it is mechanical rather
-# than a judgement call (quest-cli). This site is a FAILURE, so stderr is
-# captured and quoted verbatim; the `cat-file -e` probe below is an ANSWER and
-# keeps its 2>/dev/null. OMARK-58 recorded the defect here and prescribed this
-# exact fix without applying it; opum-doc ODOC-211 shipped it first and sent it
-# back. Measured with dev deleted from the remote: "...main is very probably
-# fine. git said: fatal: couldn't find remote ref refs/heads/dev".
-#
-# OMARK-101 (DEC-240 item 2 and (a2)). The workflow's checkout no longer persists
-# the token in .git/config, so this fetch must not rely on it. When DEV_FETCH_TOKEN
-# is set it reaches THIS ONE fetch through git's environment config
-# (GIT_CONFIG_COUNT/KEY_0/VALUE_0), set on the one command and nowhere else. Never
-# a `-c` argument: that puts the token in the process list on a shared runner. And
-# never written to .git/config. Unset, the fetch is anonymous, which works while
-# this repository is public (measured 2026-10-26: smart-HTTP info/refs answered
-# 200 with no credentials) and fails closed through the branch below if it is not.
-fetch_dev() {
-  if [ -n "${DEV_FETCH_TOKEN:-}" ]; then
-    local auth
-    auth="$(printf 'x-access-token:%s' "$DEV_FETCH_TOKEN" | base64 | tr -d '\n')"
-    GIT_CONFIG_COUNT=1 \
-      GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
-      GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
-      git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>&1
+# What replaces the fetch's failure handling is a NAMED check that the ref is
+# there, split into the same two causes the previous-HEAD test below splits: a
+# shallow or single-branch checkout (a fault in the workflow) versus a ref that
+# really is missing from a full clone. Reading a ref cannot be silently stale the
+# way a failed fetch can, but it can be ABSENT, and an absent ref must stop the
+# job with a message, not fall through to a crash with no annotation.
+is_shallow="$(git rev-parse --is-shallow-repository)"
+if ! dev_sha="$(git rev-parse --verify -q refs/remotes/origin/dev)"; then
+  if [ "$is_shallow" = "true" ]; then
+    echo "::error::refs/remotes/origin/dev is missing, and THIS CHECKOUT IS SHALLOW. This is a fault in the WORKFLOW, not in the promotion: the job needs actions/checkout with 'fetch-depth: 0', which fetches every branch, dev included. main is very probably fine - fix the checkout and re-run."
   else
-    git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>&1
+    echo "::error::refs/remotes/origin/dev is missing from this clone, which is NOT shallow, so this is not a fetch-depth problem. This script makes no fetch of its own, so the usual causes are that dev has been renamed or deleted on the remote, or that the checkout was narrowed to one branch. This is a fault in the WORKFLOW or the remote, NOT evidence about main: main is very probably fine."
   fi
-}
-if ! fetch_err="$(fetch_dev)"; then
-  echo "::error::could not fetch dev from origin, so main cannot be compared against it. This is a fault in the WORKFLOW or the remote, NOT evidence about main: the usual causes are that dev has been renamed or deleted on the remote, or the job is pointed at the wrong remote. main is very probably fine. git said: $(printf '%s' "$fetch_err" | tr '\n' ' ')"
   exit 1
 fi
 head_sha="$(git rev-parse HEAD)"
-if ! dev_sha="$(git rev-parse --verify -q origin/dev)"; then
-  # Same missing object, two causes, same split as the previous-HEAD test below.
-  if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
-    echo "::error::the fetch reported success but origin/dev still does not resolve, and THIS CHECKOUT IS SHALLOW. This is a fault in the WORKFLOW, not in the promotion: the job needs actions/checkout with 'fetch-depth: 0'. main is very probably fine - fix the checkout and re-run."
-  else
-    echo "::error::the fetch reported success but origin/dev still does not resolve, in a clone that is NOT shallow, so this is not a fetch-depth problem. Treat as a real anomaly in the remote's refs rather than a pass."
-  fi
-  exit 1
-fi
 
 # ASSERTION 2 - came from dev. Unchanged from the original; do not drop it.
 if ! git merge-base --is-ancestor "$head_sha" "$dev_sha"; then
@@ -103,9 +73,8 @@ elif ! git cat-file -e "${before}^{commit}" 2>/dev/null; then
   # only the alarming one - reporting a damaged main when the real fault was a
   # missing fetch-depth: 0 (opum-web). The exit code is deliberately unchanged:
   # an unmeasured previous position is still not a pass. Only the diagnosis
-  # differs. Verified that the guard's own `git fetch --no-tags origin dev` does
-  # NOT deepen a shallow clone, so this branch really is reachable that way.
-  if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+  # differs. Reachable with a shallow clone that already holds origin/dev.
+  if [ "$is_shallow" = "true" ]; then
     echo "::error::THIS CHECKOUT IS SHALLOW, so main's previous HEAD ($before) was never fetched and forward movement cannot be proven. This is a fault in the WORKFLOW, not in the promotion: the job needs actions/checkout with 'fetch-depth: 0'. main is very probably fine - fix the checkout and re-run before treating this as a damaged branch."
   else
     echo "::error::main's previous HEAD ($before) cannot be resolved in this clone, so forward movement CANNOT be proven. The clone is NOT shallow, so this is not a fetch-depth problem. Treat as an anomaly, not as a pass - an object that is gone in a full clone is usually one a rewrite orphaned."
