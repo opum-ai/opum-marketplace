@@ -25,6 +25,11 @@ on:
   push:
     branches: [main]
 
+# OMARK-101: the guard job now hands GITHUB_TOKEN to one fetch, so bound what that
+# token can do to what the fetch needs. ci.yml already declares the same.
+permissions:
+  contents: read
+
 jobs:
   promotion-is-manual:
     # Always fails on a PR into main, on purpose: the merge button is the wrong
@@ -71,11 +76,21 @@ jobs:
       # test. If it is ever dropped, the script says so in those words rather
       # than reporting a damaged branch - but nothing here MEASURES that it is
       # present, which is why the wiring is only proven by a real promotion.
+      #
+      # persist-credentials: false (DEC-240 item 2 and (a2), OMARK-101). The
+      # checkout token is no longer left in .git/config. The guard's one fetch of
+      # dev gets it instead through git's environment config, scoped to that
+      # single command inside scripts/ci/assert-main-fast-forward.sh, never as a
+      # -c argument. This path runs only on a push to main, so no PR exercises it:
+      # the shape is proved by scripts/test/assert-main-fast-forward-token.test.sh
+      # and the first real promotion after landing is the live measurement.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: main must have moved forward, from dev, and completely
         env:
           BEFORE_SHA: ${{ github.event.before }}
           FORCED: ${{ github.event.forced }}
+          DEV_FETCH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/ci/assert-main-fast-forward.sh

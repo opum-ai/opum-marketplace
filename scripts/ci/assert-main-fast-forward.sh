@@ -45,7 +45,28 @@ forced="${FORCED:-false}"
 # exact fix without applying it; opum-doc ODOC-211 shipped it first and sent it
 # back. Measured with dev deleted from the remote: "...main is very probably
 # fine. git said: fatal: couldn't find remote ref refs/heads/dev".
-if ! fetch_err="$(git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>&1)"; then
+#
+# OMARK-101 (DEC-240 item 2 and (a2)). The workflow's checkout no longer persists
+# the token in .git/config, so this fetch must not rely on it. When DEV_FETCH_TOKEN
+# is set it reaches THIS ONE fetch through git's environment config
+# (GIT_CONFIG_COUNT/KEY_0/VALUE_0), set on the one command and nowhere else. Never
+# a `-c` argument: that puts the token in the process list on a shared runner. And
+# never written to .git/config. Unset, the fetch is anonymous, which works while
+# this repository is public (measured 2026-10-26: smart-HTTP info/refs answered
+# 200 with no credentials) and fails closed through the branch below if it is not.
+fetch_dev() {
+  if [ -n "${DEV_FETCH_TOKEN:-}" ]; then
+    local auth
+    auth="$(printf 'x-access-token:%s' "$DEV_FETCH_TOKEN" | base64 | tr -d '\n')"
+    GIT_CONFIG_COUNT=1 \
+      GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
+      GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" \
+      git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>&1
+  else
+    git fetch --no-tags --quiet origin '+refs/heads/dev:refs/remotes/origin/dev' 2>&1
+  fi
+}
+if ! fetch_err="$(fetch_dev)"; then
   echo "::error::could not fetch dev from origin, so main cannot be compared against it. This is a fault in the WORKFLOW or the remote, NOT evidence about main: the usual causes are that dev has been renamed or deleted on the remote, or the job is pointed at the wrong remote. main is very probably fine. git said: $(printf '%s' "$fetch_err" | tr '\n' ' ')"
   exit 1
 fi
