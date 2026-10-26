@@ -89,7 +89,7 @@
       "source": {
         "source": "github",
         "repo": "opum-ai/plain-english-styles",
-        "ref": "v0.1.0"
+        "ref": "v0.2.0"
       },
       "category": "productivity",
       "homepage": "https://github.com/opum-ai/plain-english-styles"
