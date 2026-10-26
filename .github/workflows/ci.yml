@@ -32,9 +32,24 @@ jobs:
       # fetch-depth: 0, deliberately. The default shallow checkout has no merge
       # base with the base branch, so the diff below exits 128 instead of
       # answering - see the comment on that step.
+      # persist-credentials: false (DEC-240 item 2, OMARK-101). The token is not
+      # left in .git/config for anything later in the job to read. This job's only
+      # post-checkout fetches read this PUBLIC repository's base branch, which
+      # needs no credential (smart-HTTP info/refs answers 200 anonymously).
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+      # Read the result rather than trust the request: fails by name if the
+      # checkout left an extraheader in .git/config.
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
+      # setup-node 24, the same toolchain the lore-check and tracker jobs install
+      # with, so the --ignore-scripts proof below runs on the npm CI really uses
+      # for those installs (Opus M3: it first ran on the runner's default npm).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Manifests are valid JSON and each entry is well-formed
         run: |
           set -euo pipefail
@@ -123,6 +138,18 @@ jobs:
       - name: Promotion guard has a passing proof suite
         run: bash scripts/test/assert-main-fast-forward.test.sh
 
+      # OMARK-101, DEC-240. Four proofs that the CI hardening holds and stays held.
+      # None needs the network or a credential: they use local fixtures and a git
+      # shim, so an unrelated PR cannot fail on a GitHub outage here.
+      - name: Quest version reader rejects partial and out-of-block versions
+        run: bash scripts/test/read-quest-version.test.sh
+      - name: Persisted-credential check fails by name and never prints the value
+        run: bash scripts/test/assert-no-persisted-credential.test.sh
+      - name: npm install --ignore-scripts survives a failing dependency postinstall
+        run: bash scripts/test/install-ignore-scripts.test.sh
+      - name: Workflows keep persist-credentials off, env-only expressions and --ignore-scripts
+        run: node scripts/test/workflow-hardening.test.mjs
+
       # A federated entry pins a tag so its skill can never drift from the CLI
       # it describes (OPAG-37) - but a pin only does that if the tagged
       # release actually carries the content the pin implies. lore-cli's
@@ -142,10 +169,14 @@ jobs:
       # API problem in a repository it never touched.
       - name: Federated entry pins match their own plugin version
         if: github.event_name == 'pull_request'
+        # DEC-240 item 4: the base branch name is attacker-influenced input, so it
+        # reaches the shell through env:, never interpolated into run:.
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          base="origin/${{ github.base_ref }}"
-          git fetch --no-tags origin "${{ github.base_ref }}"
+          base="origin/$BASE_REF"
+          git fetch --no-tags origin "$BASE_REF"
           if ! merge_base=$(git merge-base "$base" HEAD); then
             echo "::error::no merge base between $base and HEAD - cannot tell what this PR changed."
             exit 1
@@ -178,11 +209,13 @@ jobs:
       - name: Federated entries still resolve to the verified skill content
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="origin/${{ github.base_ref }}"
-            git fetch --no-tags origin "${{ github.base_ref }}"
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="origin/$BASE_REF"
+            git fetch --no-tags origin "$BASE_REF"
             if ! merge_base=$(git merge-base "$base" HEAD); then
               echo "::error::no merge base between $base and HEAD - cannot tell what this PR changed."
               exit 1
@@ -225,7 +258,13 @@ jobs:
     name: lore check
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false (DEC-240 item 2): this job pushes nothing and
+      # needs no token after checkout.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -241,7 +280,7 @@ jobs:
             process.stdout.write(e.source.ref || "");
           ')"
           version="${ref#v}"
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error file=.claude-plugin/marketplace.json::opum-lore pin '$ref' is not a release tag, so there is no lore version to install for lore check."
             exit 1
           fi
@@ -252,16 +291,21 @@ jobs:
         id: quest
         run: |
           set -euo pipefail
-          version="$(sed -n 's/.*Quest CLI \([0-9][0-9.]*\).*/\1/p' CLAUDE.md | head -1)"
-          if [ -z "$version" ]; then
-            echo "::error file=CLAUDE.md::No 'Quest CLI <version>' line found in the managed block; lore's quest adapter needs a declared version to install."
-            exit 1
-          fi
+          # DEC-240 item 3: read only inside the managed block, exact x.y.z, and
+          # fail by name otherwise. The assignment is its own statement so set -e
+          # sees the script's exit status.
+          version="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"
           echo "Declared Quest version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
+      # --ignore-scripts and env: (DEC-240 items 1 and 4). Dependency lifecycle
+      # scripts never run on this runner, and the resolved versions reach the
+      # shell as environment variables, not as text spliced into the command.
       - name: Install lore and quest at the declared versions
-        run: npm install -g "@opum-ai/lore@${{ steps.lore.outputs.version }}" "@opum-ai/quest@${{ steps.quest.outputs.version }}"
+        env:
+          LORE_VERSION: ${{ steps.lore.outputs.version }}
+          QUEST_VERSION: ${{ steps.quest.outputs.version }}
+        run: npm install -g --ignore-scripts "@opum-ai/lore@$LORE_VERSION" "@opum-ai/quest@$QUEST_VERSION"
 
       - name: lore check
         run: lore check
@@ -295,7 +339,13 @@ jobs:
     name: Tracker integrity
     runs-on: ubuntu-latest
     steps:
+      # persist-credentials: false (DEC-240 item 2): no push, no token needed
+      # after checkout.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
       # A literal version, not node-version-file: this repository owns no JS
       # project, so it has neither .nvmrc nor package.json to read one from.
       # 24 matches the toolchain the fleet develops against.
@@ -313,14 +363,15 @@ jobs:
         id: quest
         run: |
           set -euo pipefail
-          version="$(sed -n 's/.*Quest CLI \([0-9][0-9.]*\).*/\1/p' CLAUDE.md | head -1)"
-          if [ -z "$version" ]; then
-            echo "::error file=CLAUDE.md::No 'Quest CLI <version>' line found in the managed block. Tracker integrity cannot be checked against an undeclared version."
-            exit 1
-          fi
+          # DEC-240 item 3: bounded to the managed block, exact x.y.z, fails by name.
+          version="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"
           echo "Declared Quest version: $version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - run: npm install -g "@opum-ai/quest@${{ steps.quest.outputs.version }}"
+      # DEC-240 items 1 and 4: no dependency lifecycle scripts, version via env:.
+      - name: Install quest at the declared version
+        env:
+          QUEST_VERSION: ${{ steps.quest.outputs.version }}
+        run: npm install -g --ignore-scripts "@opum-ai/quest@$QUEST_VERSION"
 
       # Two separate steps on purpose: a combined one would report "tracker
       # integrity failed" without saying which of the two very different

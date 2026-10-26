@@ -25,6 +25,11 @@ on:
   push:
     branches: [main]
 
+# OMARK-101: bound the checkout's token to reading contents. This workflow had no
+# permissions block, so it ran with the repository default. ci.yml declares the same.
+permissions:
+  contents: read
+
 jobs:
   promotion-is-manual:
     # Always fails on a PR into main, on purpose: the merge button is the wrong
@@ -71,9 +76,20 @@ jobs:
       # test. If it is ever dropped, the script says so in those words rather
       # than reporting a damaged branch - but nothing here MEASURES that it is
       # present, which is why the wiring is only proven by a real promotion.
+      #
+      # persist-credentials: false (DEC-240 item 2 and (a2), OMARK-101). The
+      # checkout token is not left in .git/config. fetch-depth: 0 fetches every
+      # branch, so the guard reads origin/dev from this checkout and makes NO fetch
+      # of its own and receives no token (the repository is public). This path
+      # runs only on a push to main, so no PR exercises it: scripts/test covers the
+      # guard's reading of origin/dev, and the first real promotion after this
+      # landed is the live measurement.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
+      - name: No credential persisted by the checkout
+        run: bash scripts/ci/assert-no-persisted-credential.sh
       - name: main must have moved forward, from dev, and completely
         env:
           BEFORE_SHA: ${{ github.event.before }}
