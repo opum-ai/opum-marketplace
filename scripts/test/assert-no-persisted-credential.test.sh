@@ -52,7 +52,19 @@ run_in "$S/included"
 { [ "$RC" -eq 1 ] && grep -qF 'persisted a credential' <<<"$OUT" && grep -qF 'http.https://github.com/.extraheader' <<<"$OUT"; } && ok 'an extraheader reached through include.path fails by name' || no "included extraheader: exit $RC" "$OUT"
 grep -qF 'c2VjcmV0LXZhbHVl' <<<"$OUT" && no 'the included credential value was printed' "$OUT" || ok 'the included credential value is not printed'
 
+# Review LOW-5: the form actions/checkout itself uses - an includeIf "gitdir:" entry
+# pointing at a file that holds the extraheader - and the message must not claim the
+# credential is in .git/config when it is in an included file.
+mkdir "$S/incif" && git init -q "$S/incif"
+GD="$(cd "$S/incif" && pwd -P)/.git"
+git config --file "$S/incif/ci.cfg" http.https://github.com/.extraheader "$SECRET"
+git -C "$S/incif" config --local "includeIf.gitdir:$GD.path" "$S/incif/ci.cfg"
+run_in "$S/incif"
+{ [ "$RC" -eq 1 ] && grep -qF 'persisted a credential' <<<"$OUT" && grep -qF 'http.https://github.com/.extraheader' <<<"$OUT"; } && ok 'an extraheader reached through includeIf gitdir: fails by name' || no "includeIf extraheader: exit $RC" "$OUT"
+grep -qF 'c2VjcmV0LXZhbHVl' <<<"$OUT" && no 'the includeIf credential value was printed' "$OUT" || ok 'the includeIf credential value is not printed'
+grep -qF 'or a file it includes' <<<"$OUT" && ok 'the failure message says the credential may be in an included file' || no 'the message still names only .git/config' "$OUT"
+
 echo
 echo "passed $pass, failed $fail"
-[ "$pass" -ge 9 ] || { echo "ran fewer than the 9 expected passing cases"; exit 1; }
+[ "$pass" -ge 12 ] || { echo "ran fewer than the 12 expected passing cases"; exit 1; }
 [ "$fail" -eq 0 ]

@@ -36,7 +36,7 @@ fi
 # --get-regexp exits 1 when nothing matches; that is the clean case, not a failure.
 found="$(git config --local --includes --name-only --get-regexp 'http\..*extraheader' || true)"
 if [ -n "$found" ]; then
-  echo "::error::the checkout persisted a credential in .git/config (key(s): $(printf '%s' "$found" | tr '\n' ' ')). Set 'persist-credentials: false' on that actions/checkout step. The value is deliberately not printed."
+  echo "::error::the checkout persisted a credential in the local git config, which may be .git/config itself or a file it includes (key(s): $(printf '%s' "$found" | tr '\n' ' ')). Set 'persist-credentials: false' on that actions/checkout step. The value is deliberately not printed."
   exit 1
 fi
 echo "no persisted credential: read $nkeys local git config key(s), none matching http.*.extraheader."

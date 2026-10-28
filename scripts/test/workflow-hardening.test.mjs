@@ -57,16 +57,24 @@ function runText(step) {
 // line, or `npm install \\\n  -g pkg` hides its -g on the next physical line.
 const joinContinuations = (t) => t.replace(/\\\n\s*/g, ' ');
 
-// Any npm subcommand that can run a dependency lifecycle script, wherever its flags
+// The npm subcommands LISTED in the alternation below (install, i, add, ci, exec, x,
+// rebuild, rb, install-test, it, install-ci-test, cit), plus npx, wherever the flags
 // sit: `npm -g install` puts a flag BEFORE the subcommand, so the subcommand is
 // looked for anywhere later in the same shell command (up to ; & | or a newline).
-// rebuild and install-test/it/cit also execute scripts (OMARK-102 finding 3).
+// This is NOT every npm subcommand that can run a lifecycle script, and it does not
+// try to be: update, dedupe, link, init and others are not listed (OMARK-102 finding 3;
+// the remainder is recorded on the follow-up task).
 const NPM_CMD = /(^|[\s;&|(])(npm\b[^;&|\n]*?\s(install|i|add|ci|exec|x|rebuild|rb|install-test|it|install-ci-test|cit)\b|npx\b)/;
 
 // --ignore-scripts must be present AND not switched back off: `--ignore-scripts=false`
 // contains the word and means the opposite (OMARK-102 finding 2).
-const hasIgnoreScripts = (ln) =>
-  /(^|\s)--ignore-scripts(=true)?(?=\s|$|["'])/.test(ln) && !/--ignore-scripts=(false|0)\b|--no-ignore-scripts\b/.test(ln);
+// A DENYLIST of off-values (=false, =0) is evadable (=00, =null, an empty =), so this
+// is an allowlist over EVERY occurrence on the line: each must be exactly the bare
+// flag or =true, and at least one must exist (review LOW-1).
+const hasIgnoreScripts = (ln) => {
+  const occ = (ln.match(/(?:^|\s)["']?--(?:no-)?ignore-scripts\S*/g) ?? []).map((o) => o.trim().replace(/^["']|["']$/g, ''));
+  return occ.length > 0 && occ.every((o) => o === '--ignore-scripts' || o === '--ignore-scripts=true');
+};
 
 export function violations(file, text) {
   const v = [];
@@ -154,6 +162,9 @@ const bad = {
   // OMARK-102 findings 2-4. Each needle is the rule's own wording, so a rejection by
   // some OTHER rule cannot satisfy the case.
   '--ignore-scripts=false (the word present, the meaning inverted)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts=false "x@1.2.3"\n')],
+  'a bare --ignore-scripts then --ignore-scripts=00 (any occurrence counts)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts --ignore-scripts=00 "x@1.2.3"\n')],
+  'a bare --ignore-scripts then --ignore-scripts=null': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts --ignore-scripts=null "x@1.2.3"\n')],
+  'a bare --ignore-scripts then an empty --ignore-scripts=': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts --ignore-scripts= "x@1.2.3"\n')],
   '--no-ignore-scripts': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --no-ignore-scripts "x@1.2.3"\n')],
   'a flag placed before the subcommand (npm -g install)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm -g install "x@1.2.3"\n')],
   'npm rebuild': ['without --ignore-scripts', wrap('      - name: i\n        run: npm rebuild\n')],
@@ -184,11 +195,12 @@ for (const [label, run] of [
   ['--ignore-scripts=true', 'npm install -g --ignore-scripts=true "x@1.2.3"'],
   ['npm rebuild with --ignore-scripts', 'npm rebuild --ignore-scripts'],
   ['a non-install npm command', 'npm --version'],
+  ['a repeated --ignore-scripts and --ignore-scripts=true', 'npm install -g --ignore-scripts --ignore-scripts=true "x@1.2.3"'],
 ]) {
   const t = wrap(CO + CHECK + `      - shell: bash\n        run: ${run}\n`);
   violations('goodflag.yml', t).length === 0 ? ok(`accepts: ${label}`) : no(`rejected a compliant form: ${label}`, JSON.stringify(violations('goodflag.yml', t)));
 }
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 34) { console.log('ran fewer than the 34 expected passing cases'); process.exit(1); }
+if (pass < 38) { console.log('ran fewer than the 38 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
