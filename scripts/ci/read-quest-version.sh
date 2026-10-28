@@ -47,26 +47,37 @@ if [ "$begin_line" -ge "$end_line" ]; then
   exit 1
 fi
 
+# Adjacent markers (end on the line right after begin) must be named as an empty
+# block here: sed with a start line past its end line prints the start line, so
+# the range below would hand back the end marker itself as the "block" and the
+# failure would read "no Quest CLI line" instead of "empty" (OMARK-102 finding 10).
+if [ "$((end_line - begin_line))" -le 1 ]; then
+  echo "::error file=$file::the managed Quest block between its markers (lines $begin_line to $end_line) is empty." >&2
+  exit 1
+fi
 block="$(sed -n "$((begin_line + 1)),$((end_line - 1))p" "$file")"
 if [ -z "$block" ]; then
   echo "::error file=$file::the managed Quest block between its markers (lines $begin_line to $end_line) is empty." >&2
   exit 1
 fi
 
-# Exactly one declaring line. Two would mean the block says two things, and
-# taking the first silently is how a wrong version reaches npm.
-lines="$(printf '%s\n' "$block" | grep -E 'Quest CLI [^ ]+ for tracker operations' || true)"
-nlines="$(printf '%s' "$lines" | grep -c . || true)"
+# Exactly one declaration. Two would mean the block says two things, and taking
+# one silently is how a wrong version reaches npm. Count OCCURRENCES, not lines
+# (grep -o prints one per match): a single line declaring twice would otherwise
+# count as one, and the greedy sed it used to feed returned the LAST version
+# silently (OMARK-102 finding 1).
+matches="$(printf '%s\n' "$block" | grep -oE 'Quest CLI [^ ]+ for tracker operations' || true)"
+nlines="$(printf '%s' "$matches" | grep -c . || true)"
 if [ "$nlines" -eq 0 ]; then
   echo "::error file=$file::no 'Quest CLI <version> for tracker operations' line inside the managed Quest block." >&2
   exit 1
 fi
 if [ "$nlines" -gt 1 ]; then
-  echo "::error file=$file::$nlines lines inside the managed Quest block declare a Quest CLI version; exactly one is expected, so the version is ambiguous." >&2
+  echo "::error file=$file::$nlines declarations inside the managed Quest block name a Quest CLI version; exactly one is expected, so the version is ambiguous." >&2
   exit 1
 fi
 
-version="$(printf '%s\n' "$lines" | sed -n 's/.*Quest CLI \([^ ]*\) for tracker operations.*/\1/p')"
+version="$(printf '%s\n' "$matches" | sed -n 's/^Quest CLI \([^ ]*\) for tracker operations$/\1/p')"
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::error file=$file::the Quest version '$version' is not an exact MAJOR.MINOR.PATCH. npm would treat a partial version as a range, so it is refused before it can reach npm." >&2
   exit 1

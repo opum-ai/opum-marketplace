@@ -23,7 +23,10 @@ function steps(text) {
   const lines = text.split('\n');
   const out = [];
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^(\s*)- (name|uses|run|id|if|env|with)\b/);
+    // Every key a step may open with. A step that begins `- shell:` or
+    // `- working-directory:` would otherwise be skipped entirely and every rule
+    // below would never see it (OMARK-102 finding 4).
+    const m = lines[i].match(/^(\s*)- (name|uses|run|id|if|env|with|shell|working-directory|timeout-minutes|continue-on-error)\b/);
     if (!m) continue;
     const ind = m[1].length;
     let j = i + 1;
@@ -54,7 +57,24 @@ function runText(step) {
 // line, or `npm install \\\n  -g pkg` hides its -g on the next physical line.
 const joinContinuations = (t) => t.replace(/\\\n\s*/g, ' ');
 
-const NPM_CMD = /(^|[\s;&|(])(npm\s+(install|i|add|ci|exec|x)\b|npx\b)/;
+// The npm subcommands LISTED in the alternation below (install, i, add, ci, exec, x,
+// rebuild, rb, install-test, it, install-ci-test, cit), plus npx, wherever the flags
+// sit: `npm -g install` puts a flag BEFORE the subcommand, so the subcommand is
+// looked for anywhere later in the same shell command (up to ; & | or a newline).
+// This is NOT every npm subcommand that can run a lifecycle script, and it does not
+// try to be: update, dedupe, link, init and others are not listed (OMARK-102 finding 3;
+// the remainder is recorded on the follow-up task).
+const NPM_CMD = /(^|[\s;&|(])(npm\b[^;&|\n]*?\s(install|i|add|ci|exec|x|rebuild|rb|install-test|it|install-ci-test|cit)\b|npx\b)/;
+
+// --ignore-scripts must be present AND not switched back off: `--ignore-scripts=false`
+// contains the word and means the opposite (OMARK-102 finding 2).
+// A DENYLIST of off-values (=false, =0) is evadable (=00, =null, an empty =), so this
+// is an allowlist over EVERY occurrence on the line: each must be exactly the bare
+// flag or =true, and at least one must exist (review LOW-1).
+const hasIgnoreScripts = (ln) => {
+  const occ = (ln.match(/(?:^|\s)["']?--(?:no-)?ignore-scripts\S*/g) ?? []).map((o) => o.trim().replace(/^["']|["']$/g, ''));
+  return occ.length > 0 && occ.every((o) => o === '--ignore-scripts' || o === '--ignore-scripts=true');
+};
 
 export function violations(file, text) {
   const v = [];
@@ -80,7 +100,7 @@ export function violations(file, text) {
     // Item 1: any npm install/ci/exec or npx, global or not, must not run dependency
     // lifecycle scripts.
     for (const ln of run.split('\n')) {
-      if (NPM_CMD.test(ln) && !/--ignore-scripts\b/.test(ln)) {
+      if (NPM_CMD.test(ln) && !hasIgnoreScripts(ln)) {
         v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${ln.trim()}`);
       }
     }
@@ -139,6 +159,19 @@ const bad = {
   'npx': ['without --ignore-scripts', wrap('      - name: i\n        run: npx some-tool\n')],
   'npm exec': ['without --ignore-scripts', wrap('      - name: i\n        run: npm exec some-tool\n')],
   'a non-global npm ci': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci\n')],
+  // OMARK-102 findings 2-4. Each needle is the rule's own wording, so a rejection by
+  // some OTHER rule cannot satisfy the case.
+  '--ignore-scripts=false (the word present, the meaning inverted)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts=false "x@1.2.3"\n')],
+  'a bare --ignore-scripts then --ignore-scripts=00 (any occurrence counts)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts --ignore-scripts=00 "x@1.2.3"\n')],
+  'a bare --ignore-scripts then --ignore-scripts=null': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts --ignore-scripts=null "x@1.2.3"\n')],
+  'a bare --ignore-scripts then an empty --ignore-scripts=': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts --ignore-scripts= "x@1.2.3"\n')],
+  '--no-ignore-scripts': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --no-ignore-scripts "x@1.2.3"\n')],
+  'a flag placed before the subcommand (npm -g install)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm -g install "x@1.2.3"\n')],
+  'npm rebuild': ['without --ignore-scripts', wrap('      - name: i\n        run: npm rebuild\n')],
+  'npm install-test': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install-test\n')],
+  'a step opening with shell: (npm ci inside it)': ['without --ignore-scripts', wrap('      - shell: bash\n        run: npm ci\n')],
+  'a step opening with working-directory: (npm ci inside it)': ['without --ignore-scripts', wrap('      - working-directory: sub\n        run: npm ci\n')],
+  'a step opening with timeout-minutes: carrying a ${{ }} in run:': ['interpolated inside run', wrap('      - timeout-minutes: 5\n        run: echo "${{ github.base_ref }}"\n')],
   'Quest version read by sed': ['names the', wrap("      - name: q\n        run: |\n          v=\"$(sed -n 's/.*Quest CLI \\([0-9.]*\\).*/\\1/p' CLAUDE.md)\"\n")],
   'Quest version read by grep (not sed)': ['reads CLAUDE.md without', wrap("      - name: q\n        run: v=\"$(grep -o '[0-9][0-9.]*' CLAUDE.md | head -1)\"\n")],
   'Quest version read by awk naming the phrase': ['names the', wrap("      - name: q\n        run: awk '/Quest CLI/ {print $4}' x\n")],
@@ -155,6 +188,19 @@ violations('good.yml', good).length === 0 ? ok('accepts a compliant fixture') : 
 const goodCont = wrap(CO + CHECK + '      - name: i\n        run: |\n          npm install \\\n            -g --ignore-scripts "x@1.2.3"\n');
 violations('goodcont.yml', goodCont).length === 0 ? ok('accepts a compliant backslash-continued install') : no('rejected a compliant continued install', JSON.stringify(violations('goodcont.yml', goodCont)));
 
+// The same widening must not turn compliant forms into violations: a flag before the
+// subcommand with the guard present, an explicit =true, and a shell:-led step.
+for (const [label, run] of [
+  ['npm -g install with --ignore-scripts', 'npm -g install --ignore-scripts "x@1.2.3"'],
+  ['--ignore-scripts=true', 'npm install -g --ignore-scripts=true "x@1.2.3"'],
+  ['npm rebuild with --ignore-scripts', 'npm rebuild --ignore-scripts'],
+  ['a non-install npm command', 'npm --version'],
+  ['a repeated --ignore-scripts and --ignore-scripts=true', 'npm install -g --ignore-scripts --ignore-scripts=true "x@1.2.3"'],
+]) {
+  const t = wrap(CO + CHECK + `      - shell: bash\n        run: ${run}\n`);
+  violations('goodflag.yml', t).length === 0 ? ok(`accepts: ${label}`) : no(`rejected a compliant form: ${label}`, JSON.stringify(violations('goodflag.yml', t)));
+}
+
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 22) { console.log('ran fewer than the 22 expected passing cases'); process.exit(1); }
+if (pass < 38) { console.log('ran fewer than the 38 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);

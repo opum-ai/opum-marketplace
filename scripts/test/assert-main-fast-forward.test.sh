@@ -47,6 +47,11 @@
 #                drop assertion 3 -> DIED, 3
 #                drop the fetch refspec -> DIED, 1 (SURVIVED at 0 before OMARK-59)
 #                restore 2>/dev/null on the fetch -> DIED, 1
+#                  [HISTORICAL, OMARK-102 finding 8: OMARK-101 removed the guard's
+#                  own fetch, so those two rows describe mutants that can no longer
+#                  be built. The property they covered - a missing origin/dev - is
+#                  now carried by the two SHALLOW rows after "previous position"
+#                  below, not by a refspec.]
 #   WORKFLOW     BEFORE_SHA -> ${{ github.sha }} -> DIED, 1
 #                env block deleted -> DIED, 2
 #                mappings left ONLY as comments, guard disabled underneath
@@ -297,7 +302,11 @@ run "a full clone that cannot resolve the previous HEAD blames a rewrite" "$C4" 
 # =1 and +::error:: are the liveness half. Without them, dropping the fetch
 # refspec gives exit 128 with NO output, and -"rewrite orphaned" passes by
 # silence - the branch is unreachable and the case still goes green.
-# The last assertion is what measures the FETCH REFSPEC, and it is a negative
+# [OMARK-102 finding 8: the paragraph below is the account of a mutant that no
+# longer exists. OMARK-101 removed the guard's own fetch and its refspec; what it
+# explains still holds for the last assertion above (the sentence-stem negative),
+# which now tells the two named missing-origin/dev sites apart instead.]
+# The last assertion is what measured the FETCH REFSPEC, and it is a negative
 # because the two diagnoses are worded to overlap deliberately. Drop the refspec
 # and origin/dev is never created, so the rev-parse --verify split ONE STEP
 # EARLIER fires - and its message carries the same "THIS CHECKOUT IS SHALLOW",
@@ -412,9 +421,56 @@ done
 grep -qE '^\s*persist-credentials:\s*false\s*$' <<<"$depth" \
   && ok "the guard job's checkout sets persist-credentials: false" \
   || no "persist-credentials: false missing from the guard job" 1 "$depth"
-grep -q 'DEV_FETCH_TOKEN\|secrets\.GITHUB_TOKEN' <<<"$depth" \
-  && no "the guard job still passes a token" 1 "$depth" \
-  || ok "the guard job passes no token (the guard reads origin/dev from the checkout)"
+# OMARK-102 finding 8 + review MEDIUM-1: any secret or token reference, not only the
+# two names the removed fetch used. The predicate is a function over RAW job text so
+# the suite can fire it on fixture strings (a negative check with no positive control
+# is satisfied by a predicate that matches nothing).
+#   - `secrets\b` covers secrets.X, secrets['X'] and toJSON(secrets); `github.token`,
+#     github['token'] and toJSON(github) cover the other ways to reach the token.
+#   - Only WHOLE-LINE comments are stripped. The shared `sed 's/#.*//'` above would eat
+#     `AUTH: "#${{ secrets.PAT }}"` before the grep saw the reference. Keeping a trailing
+#     `# ...` can only over-report, never hide a reference.
+# Returns grep's own status: 0 = a token reference was found, 1 = none, 2 = the grep
+# itself failed (a bad ERE) - the caller must not read 2 as "none".
+TOKEN_RE='secrets\b|github[.[]token|github\[|tojson\([[:space:]]*github|[a-z_]*token[a-z_]*[[:space:]]*:'
+token_scan() { sed -E 's/^[[:space:]]*#.*$//' <<<"$1" | grep -qiE -- "${2:-$TOKEN_RE}"; }
+depth_raw=$(awk '/^  main-is-fast-forward-of-dev:/{f=1;next} /^  [a-z-]+:$/{f=0} f' \
+              "$HERE/../../.github/workflows/promotion-guards.yml")
+[ -n "$depth_raw" ] && ok "read the guard job's raw text for the token scan ($(printf '%s' "$depth_raw" | grep -c .) non-empty lines)" \
+  || no "the guard job's raw text was empty, so the token scan would read nothing" 1 ""
+token_scan "$depth_raw"; rc=$?
+case "$rc" in
+  1) ok "the guard job passes no token (the guard reads origin/dev from the checkout)" ;;
+  0) no "the guard job still passes a token" 1 "$depth_raw" ;;
+  *) no "the token scan itself failed (grep exit $rc), so 'no token' cannot be claimed" "$rc" "$depth_raw" ;;
+esac
+# Positive control, in the suite: each way of reaching a credential must FIRE the
+# predicate. Each fixture is a line a workflow could carry.
+while IFS= read -r fx; do
+  token_scan "$fx"; frc=$?
+  [ "$frc" -eq 0 ] && ok "token scan fires on: $fx" || no "token scan did NOT fire (exit $frc) on: $fx" "$frc" "$fx"
+done <<'FIXTURES'
+        AUTH: ${{ secrets.PAT }}
+        AUTH: ${{ secrets['PAT'] }}
+        ALL: ${{ toJSON(secrets) }}
+        X: ${{ github['token'] }}
+        X: ${{ github.token }}
+        X: ${{ toJSON(github) }}
+        AUTH: "#${{ secrets.PAT }}"
+        GH_TOKEN: abc
+FIXTURES
+# ...and clean lines must NOT fire it, so the predicate is not a blanket.
+while IFS= read -r fx; do
+  token_scan "$fx"; frc=$?
+  [ "$frc" -eq 1 ] && ok "token scan is silent on: $fx" || no "token scan fired or failed (exit $frc) on a clean line: $fx" "$frc" "$fx"
+done <<'FIXTURES'
+        BEFORE_SHA: ${{ github.event.before }}
+          persist-credentials: false
+      # secrets.PAT is mentioned only in a whole-line comment
+FIXTURES
+# A bad ERE must read as an error (exit 2), never as "no token".
+token_scan "anything" '(' ; erc=$?
+[ "$erc" -eq 2 ] && ok "a broken ERE is reported as grep exit 2, not as a clean scan" || no "a broken ERE gave exit $erc, not 2" "$erc" ""
 grep -q 'scripts/ci/assert-no-persisted-credential.sh' <<<"$depth" \
   && ok "the guard job reads the checkout's credential state" \
   || no "the guard job does not run assert-no-persisted-credential.sh" 1 "$depth"
