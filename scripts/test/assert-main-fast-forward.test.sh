@@ -47,6 +47,11 @@
 #                drop assertion 3 -> DIED, 3
 #                drop the fetch refspec -> DIED, 1 (SURVIVED at 0 before OMARK-59)
 #                restore 2>/dev/null on the fetch -> DIED, 1
+#                  [HISTORICAL, OMARK-102 finding 8: OMARK-101 removed the guard's
+#                  own fetch, so those two rows describe mutants that can no longer
+#                  be built. The property they covered - a missing origin/dev - is
+#                  now carried by the two SHALLOW rows after "previous position"
+#                  below, not by a refspec.]
 #   WORKFLOW     BEFORE_SHA -> ${{ github.sha }} -> DIED, 1
 #                env block deleted -> DIED, 2
 #                mappings left ONLY as comments, guard disabled underneath
@@ -297,7 +302,11 @@ run "a full clone that cannot resolve the previous HEAD blames a rewrite" "$C4" 
 # =1 and +::error:: are the liveness half. Without them, dropping the fetch
 # refspec gives exit 128 with NO output, and -"rewrite orphaned" passes by
 # silence - the branch is unreachable and the case still goes green.
-# The last assertion is what measures the FETCH REFSPEC, and it is a negative
+# [OMARK-102 finding 8: the paragraph below is the account of a mutant that no
+# longer exists. OMARK-101 removed the guard's own fetch and its refspec; what it
+# explains still holds for the last assertion above (the sentence-stem negative),
+# which now tells the two named missing-origin/dev sites apart instead.]
+# The last assertion is what measured the FETCH REFSPEC, and it is a negative
 # because the two diagnoses are worded to overlap deliberately. Drop the refspec
 # and origin/dev is never created, so the rev-parse --verify split ONE STEP
 # EARLIER fires - and its message carries the same "THIS CHECKOUT IS SHALLOW",
@@ -412,7 +421,10 @@ done
 grep -qE '^\s*persist-credentials:\s*false\s*$' <<<"$depth" \
   && ok "the guard job's checkout sets persist-credentials: false" \
   || no "persist-credentials: false missing from the guard job" 1 "$depth"
-grep -q 'DEV_FETCH_TOKEN\|secrets\.GITHUB_TOKEN' <<<"$depth" \
+# OMARK-102 finding 8: any secret or token reference, not only the two names the
+# removed fetch used. A renamed secret, `secrets.<anything>`, `github.token`, or a
+# *TOKEN env name or `token:` input would all have passed the narrower grep.
+grep -qiE 'secrets\.|github\.token|[a-z_]*token[a-z_]*\s*:' <<<"$depth" \
   && no "the guard job still passes a token" 1 "$depth" \
   || ok "the guard job passes no token (the guard reads origin/dev from the checkout)"
 grep -q 'scripts/ci/assert-no-persisted-credential.sh' <<<"$depth" \

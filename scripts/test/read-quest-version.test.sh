@@ -70,7 +70,22 @@ out="$(bash "$READER" "$S/swapped-version.md" 2>/dev/null)"
 
 # Two declaring lines inside one block are ambiguous, not "take the first".
 block "$(printf 'This project uses Quest CLI 0.14.1 for tracker operations.\nAlso Quest CLI 0.13.0 for tracker operations.')" > "$S/twolines.md"
-check 'two version lines in the block fail by name' "$S/twolines.md" 1 "declare a Quest CLI version; exactly one is expected"
+check 'two version lines in the block fail by name' "$S/twolines.md" 1 "name a Quest CLI version; exactly one is expected"
+
+# OMARK-102 finding 1: two declarations on ONE line. A line count sees one line, and
+# the greedy sed returned the LAST version (0.13.0) silently. Exit 1 and an empty
+# stdout are both asserted: the old reader exited 0 printing 0.13.0.
+block 'This project uses Quest CLI 0.14.1 for tracker operations, not Quest CLI 0.13.0 for tracker operations.' > "$S/sameline.md"
+check 'two declarations on one line fail by name' "$S/sameline.md" 1 "2 declarations inside the managed Quest block"
+out="$(bash "$READER" "$S/sameline.md" 2>/dev/null)"
+[ -z "$out" ] && ok 'the same-line fixture printed no version on stdout' || no 'the same-line fixture printed a version' 0 "$out"
+
+# OMARK-102 finding 10: adjacent markers are an EMPTY block, not "no Quest CLI line".
+# The empty-block message is asserted AND the other cause's wording is asserted absent.
+printf '%s\n%s\n' "$BEGIN" "$END" > "$S/adjacent.md"
+check 'adjacent markers fail as an empty block' "$S/adjacent.md" 1 "is empty"
+out="$(bash "$READER" "$S/adjacent.md" 2>&1)"
+grep -qF "no 'Quest CLI" <<<"$out" && no 'adjacent markers were reported as a missing version line' 1 "$out" || ok 'adjacent markers are not reported as a missing version line'
 
 # CRLF is named as the cause, not reported as missing markers.
 block 'This project uses Quest CLI 0.14.1 for tracker operations.' | sed 's/$/\r/' > "$S/crlf.md"
@@ -85,5 +100,5 @@ if [ "$rc" -eq 0 ] && [[ "$live" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then ok "live C
 echo
 echo "passed $pass, failed $fail"
 # A suite that ran fewer cases than it was written for must not pass.
-[ "$pass" -ge 17 ] || { echo "ran fewer than the 17 expected passing cases"; exit 1; }
+[ "$pass" -ge 21 ] || { echo "ran fewer than the 21 expected passing cases"; exit 1; }
 [ "$fail" -eq 0 ]

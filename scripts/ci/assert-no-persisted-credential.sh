@@ -20,7 +20,10 @@ fi
 
 # Positive control: the local config must have yielded at least one key, or a
 # clean answer below would come from reading nothing.
-if ! all_keys="$(git config --local --name-only --list)"; then
+# --includes on both reads: `git config --local` does not follow include or
+# includeIf unless asked, so a credential moved into an included file would read
+# as clean (OMARK-102 finding 6).
+if ! all_keys="$(git config --local --includes --name-only --list)"; then
   echo "::error::could not read the local git config, so a persisted credential cannot be ruled out."
   exit 1
 fi
@@ -31,7 +34,7 @@ if [ "$nkeys" -lt 1 ]; then
 fi
 
 # --get-regexp exits 1 when nothing matches; that is the clean case, not a failure.
-found="$(git config --local --name-only --get-regexp 'http\..*extraheader' || true)"
+found="$(git config --local --includes --name-only --get-regexp 'http\..*extraheader' || true)"
 if [ -n "$found" ]; then
   echo "::error::the checkout persisted a credential in .git/config (key(s): $(printf '%s' "$found" | tr '\n' ' ')). Set 'persist-credentials: false' on that actions/checkout step. The value is deliberately not printed."
   exit 1
