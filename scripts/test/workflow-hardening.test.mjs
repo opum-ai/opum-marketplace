@@ -42,11 +42,23 @@ function steps(text) {
 function runText(step) {
   const out = [];
   const L = step.lines;
+  const keyCol = L[0].match(/^\s*-\s+/)?.[0].length ?? 0;
   for (let k = 0; k < L.length; k++) {
-    // Optional quotes around the key and any run of spaces after the dash (OMARK-106 LOW-4).
-    const m = L[k].match(/^(\s*)(-\s+)?["']?run["']?\s*:\s*(.*)$/);
-    if (!m) continue;
-    const ind = m[1].length + (m[2] ? m[2].length : 0);
+    // Dev's match, unchanged: an unquoted `run:` at any depth, with a one-space dash.
+    let m = L[k].match(/^(\s*)(?:- )?run:\s*(.*)$/);
+    let ind;
+    if (m) {
+      ind = m[1].length + (L[k].trimStart().startsWith('- ') ? 2 : 0);
+      m = [m[0], m[1], null, m[2]];
+    } else {
+      // OMARK-106 LOW-4: a quoted key, a spaced colon or a multi-space dash are accepted ONLY
+      // on the step's own dash line or at the step's key column. Anywhere else (an env var
+      // or with-input named "run") they are not the step's run text (round-4 blocker).
+      m = L[k].match(/^(\s*)(-\s+)?["']?run["']?\s*:\s*(.*)$/);
+      if (!m) continue;
+      if (k !== 0 && !(indentOf(L[k]) === keyCol && !m[2])) continue;
+      ind = m[1].length + (m[2] ? m[2].length : 0);
+    }
     // A block-scalar header: | or > with an optional chomping (-/+) and indentation
     // indicator (1-9) in either order, then an optional comment. The old test accepted only
     // a bare marker, so `run: |2` or `run: | # note` was read as a one-line value
@@ -206,7 +218,7 @@ const bad = {
   'a step opening with working-directory: (npm ci inside it)': ['without --ignore-scripts', wrap('      - working-directory: sub\n        run: npm ci\n')],
   'a step opening with timeout-minutes: carrying a ${{ }} in run:': ['interpolated inside run', wrap('      - timeout-minutes: 5\n        run: echo "${{ github.base_ref }}"\n')],
   // OMARK-106. Each needle is the rule's own wording.
-  'LOW-3: the flag on one command, a later npm install after ;': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci --ignore-scripts; npm install x\n')],
+  'a bare flag with a stuck ; (rejected as a non-bare token, not as a second command)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci --ignore-scripts; npm install x\n')],
   'LOW-3: the flag only in a whole-line comment in a block': ['without --ignore-scripts', wrap('      - name: i\n        run: |\n          # --ignore-scripts\n          npm ci\n')],
   'LOW-4: two spaces after the step dash': ['without --ignore-scripts', wrap('      -  run: npm ci\n')],
   'LOW-4: a quoted run key': ['without --ignore-scripts', wrap('      - "run": npm ci\n')],
@@ -215,9 +227,9 @@ const bad = {
   'LOW-4: a block scalar with an indentation indicator': ['without --ignore-scripts', wrap('      - name: i\n        run: |2\n          npm ci\n')],
   'LOW-4: a block scalar with a trailing comment after the marker': ['without --ignore-scripts', wrap('      - name: i\n        run: | # note\n          npm ci\n')],
   'LOW-4: a block scalar with chomping and a comment (>-)': ['without --ignore-scripts', wrap('      - name: i\n        run: >- # note\n          npm ci\n')],
-  'LOW-2: npm install abbreviation ins': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ins x\n')],
-  'LOW-2: npm init': ['without --ignore-scripts', wrap('      - name: i\n        run: npm init x\n')],
-  'LOW-2: npm create': ['without --ignore-scripts', wrap('      - name: i\n        run: npm create x\n')],
+  'npm ins x (rejected only through the trailing x exec alias, not through ins)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ins x\n')],
+  'npm init x (rejected only through the trailing x exec alias)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm init x\n')],
+  'npm create x (rejected only through the trailing x exec alias)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm create x\n')],
   'R2-3: a bare --ignore-scripts then the word false': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts false "x"\n')],
   'R2-4: a bare flag, then empty quotes stuck to a false one': ['without --ignore-scripts', wrap("      - name: i\n        run: npm install -g --ignore-scripts ''--ignore-scripts=false x\n")],
   'R2-4: a bare flag, then a backslash stuck to a false one': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts \\--ignore-scripts=false x\n')],
@@ -247,6 +259,11 @@ const bad = {
   'R2-6: the flag only inside a $( ) that expands to nothing': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci $(: --ignore-scripts)\n')],
   'R2-6: the flag only inside a backticked no-op': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci `: --ignore-scripts`\n')],
   'R2-8: npm run ci followed by a real npm ci': ['without --ignore-scripts', wrap('      - name: i\n        run: npm run ci && npm ci\n')],
+  // Round-4 blocker: a quoted/spaced `run` key under env: or with: is NOT the step's run text.
+  // Dev rejects each of these; each was confirmed accepted on 25d16b2.
+  'R4-a: a quoted "run" env key naming the credential script, the real run is echo': ['does not run scripts/ci/assert-no-persisted-credential.sh', wrap(CO + '      - name: c\n        env:\n          "run": bash scripts/ci/assert-no-persisted-credential.sh\n        run: echo hi\n')],
+  'R4-b: a quoted "run" env key naming the version reader, the real run cats CLAUDE.md': ['reads CLAUDE.md without', wrap('      - name: q\n        env:\n          "run": scripts/ci/read-quest-version.sh\n        run: cat CLAUDE.md\n')],
+  'R4-c: a quoted "run" env value completing a continued npm ci': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci \\\n        env:\n          "run": --ignore-scripts\n')],
   'Quest version read by sed': ['names the', wrap("      - name: q\n        run: |\n          v=\"$(sed -n 's/.*Quest CLI \\([0-9.]*\\).*/\\1/p' CLAUDE.md)\"\n")],
   'Quest version read by grep (not sed)': ['reads CLAUDE.md without', wrap("      - name: q\n        run: v=\"$(grep -o '[0-9][0-9.]*' CLAUDE.md | head -1)\"\n")],
   'Quest version read by awk naming the phrase': ['names the', wrap("      - name: q\n        run: awk '/Quest CLI/ {print $4}' x\n")],
@@ -282,7 +299,6 @@ for (const [label, run] of [
   ['npm update with the flag', 'npm update --ignore-scripts'],
   ['a path-prefixed npm with the flag', '/usr/bin/npm ci --ignore-scripts'],
   ['a quoted run value', '"npm ci --ignore-scripts"'],
-  ['a quoted flag', 'npm ci "--ignore-scripts"'],
   ['a repeated --ignore-scripts and --ignore-scripts=true', 'npm install -g --ignore-scripts --ignore-scripts=true "x@1.2.3"'],
 ]) {
   const t = wrap(CO + CHECK + `      - shell: bash\n        run: ${run}\n`);
@@ -304,5 +320,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 93) { console.log('ran fewer than the 93 expected passing cases'); process.exit(1); }
+if (pass < 95) { console.log('ran fewer than the 95 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
