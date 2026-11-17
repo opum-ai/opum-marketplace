@@ -56,7 +56,9 @@ if [ "$((end_line - begin_line))" -le 1 ]; then
   exit 1
 fi
 block="$(sed -n "$((begin_line + 1)),$((end_line - 1))p" "$file")"
-if [ -z "$block" ]; then
+# Whitespace-only counts as empty too (OMARK-106 LOW-6): `-z` alone passed a block of
+# blank lines or spaces and the failure then read "no Quest CLI line".
+if [ -z "$(printf '%s' "$block" | tr -d '[:space:]')" ]; then
   echo "::error file=$file::the managed Quest block between its markers (lines $begin_line to $end_line) is empty." >&2
   exit 1
 fi

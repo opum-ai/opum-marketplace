@@ -421,28 +421,35 @@ done
 grep -qE '^\s*persist-credentials:\s*false\s*$' <<<"$depth" \
   && ok "the guard job's checkout sets persist-credentials: false" \
   || no "persist-credentials: false missing from the guard job" 1 "$depth"
-# OMARK-102 finding 8 + review MEDIUM-1: any secret or token reference, not only the
-# two names the removed fetch used. The predicate is a function over RAW job text so
-# the suite can fire it on fixture strings (a negative check with no positive control
-# is satisfied by a predicate that matches nothing).
+# OMARK-102 finding 8 + review MEDIUM-1, widened by OMARK-106: any secret or token
+# reference, not only the two names the removed fetch used. The predicate is a function
+# over RAW text so the suite can fire it on fixture strings (a negative check with no
+# positive control is satisfied by a predicate that matches nothing).
 #   - `secrets\b` covers secrets.X, secrets['X'] and toJSON(secrets); `github.token`,
 #     github['token'] and toJSON(github) cover the other ways to reach the token.
-#   - Only WHOLE-LINE comments are stripped. The shared `sed 's/#.*//'` above would eat
-#     `AUTH: "#${{ secrets.PAT }}"` before the grep saw the reference. Keeping a trailing
-#     `# ...` can only over-report, never hide a reference.
+#   - OMARK-106: the scan reads the WHOLE workflow file, not the guard job's slice. A
+#     workflow-level `env:` is inherited by every job, so a secret placed there would
+#     never appear in the slice. `github.*`, a bare `github` handed to a function, and an
+#     expression opened with `${{` that does not close on its line (it is split across
+#     lines, so no single-line pattern sees the reference) are also treated as reaching
+#     the token.
+#   - NO comment stripping (OMARK-106). A whole-line strip also hid a real reference
+#     inside a YAML block scalar (a `run: |` body or an `AUTH: |` value whose line starts
+#     with `#`). The workflow is silent without the strip, measured below, so the
+#     strip bought nothing and cost a blind spot; a comment that names a secret now
+#     fires on purpose and the author rewords it.
 # Returns grep's own status: 0 = a token reference was found, 1 = none, 2 = the grep
 # itself failed (a bad ERE) - the caller must not read 2 as "none".
-TOKEN_RE='secrets\b|github[.[]token|github\[|tojson\([[:space:]]*github|[a-z_]*token[a-z_]*[[:space:]]*:'
-token_scan() { sed -E 's/^[[:space:]]*#.*$//' <<<"$1" | grep -qiE -- "${2:-$TOKEN_RE}"; }
-depth_raw=$(awk '/^  main-is-fast-forward-of-dev:/{f=1;next} /^  [a-z-]+:$/{f=0} f' \
-              "$HERE/../../.github/workflows/promotion-guards.yml")
-[ -n "$depth_raw" ] && ok "read the guard job's raw text for the token scan ($(printf '%s' "$depth_raw" | grep -c .) non-empty lines)" \
-  || no "the guard job's raw text was empty, so the token scan would read nothing" 1 ""
-token_scan "$depth_raw"; rc=$?
+TOKEN_RE='secrets\b|github[.[]token|github\[|tojson\([[:space:]]*github|[a-z_]*token[a-z_]*[[:space:]]*:|github\.\*|github[[:space:]]*[,)]|\$\{\{[^}]*$'
+token_scan() { grep -qiE -- "${2:-$TOKEN_RE}" <<<"$1"; }
+wf_raw=$(cat "$HERE/../../.github/workflows/promotion-guards.yml")
+[ -n "$wf_raw" ] && ok "read the whole promotion-guards workflow's raw text for the token scan ($(printf '%s' "$wf_raw" | grep -c .) non-empty lines)" \
+  || no "the workflow's raw text was empty, so the token scan would read nothing" 1 ""
+token_scan "$wf_raw"; rc=$?
 case "$rc" in
-  1) ok "the guard job passes no token (the guard reads origin/dev from the checkout)" ;;
-  0) no "the guard job still passes a token" 1 "$depth_raw" ;;
-  *) no "the token scan itself failed (grep exit $rc), so 'no token' cannot be claimed" "$rc" "$depth_raw" ;;
+  1) ok "the workflow passes no token anywhere (the guard reads origin/dev from the checkout)" ;;
+  0) no "the workflow references a secret or token" 1 "$wf_raw" ;;
+  *) no "the token scan itself failed (grep exit $rc), so 'no token' cannot be claimed" "$rc" "$wf_raw" ;;
 esac
 # Positive control, in the suite: each way of reaching a credential must FIRE the
 # predicate. Each fixture is a line a workflow could carry.
@@ -458,6 +465,11 @@ done <<'FIXTURES'
         X: ${{ toJSON(github) }}
         AUTH: "#${{ secrets.PAT }}"
         GH_TOKEN: abc
+      # secrets.PAT inside a whole-line comment now fires (OMARK-106)
+          # secrets.PAT as the body line of a block scalar
+        X: ${{ join(github.*, ',') }}
+        X: ${{ format('{0}', github) }}
+        X: ${{
 FIXTURES
 # ...and clean lines must NOT fire it, so the predicate is not a blanket.
 while IFS= read -r fx; do
@@ -466,8 +478,13 @@ while IFS= read -r fx; do
 done <<'FIXTURES'
         BEFORE_SHA: ${{ github.event.before }}
           persist-credentials: false
-      # secrets.PAT is mentioned only in a whole-line comment
+        X: ${{ github.event.forced }}
 FIXTURES
+# OMARK-106: a workflow-level env holding a secret, in a whole file shape (it sits above
+# every job, so a per-job slice never saw it).
+wf_env_fx=$'name: x\nenv:\n  PAT: ${{ secrets.PAT }}\njobs:\n  a:\n    runs-on: ubuntu-latest\n'
+token_scan "$wf_env_fx"; frc=$?
+[ "$frc" -eq 0 ] && ok "token scan fires on a workflow-level env secret (above every job)" || no "token scan missed a workflow-level env secret (exit $frc)" "$frc" "$wf_env_fx"
 # A bad ERE must read as an error (exit 2), never as "no token".
 token_scan "anything" '(' ; erc=$?
 [ "$erc" -eq 2 ] && ok "a broken ERE is reported as grep exit 2, not as a clean scan" || no "a broken ERE gave exit $erc, not 2" "$erc" ""
