@@ -120,8 +120,77 @@ const flowStyle = (text) => text.split('\n').map((l, i) => [l, i + 1])
 // Workflow files are *.yml AND *.yaml (OMARK-106 LOW-4: the .yml-only filter skipped .yaml).
 export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 
+// OMARK-109 (DEC-240 AC 3, opum-doc ruling A). The lint above is a line scanner and every
+// review round found another evasion of it, so the control is the environment: every job that
+// runs npm sets `npm_config_ignore_scripts: "true"` at JOB level, and npm then skips dependency
+// lifecycle scripts whatever the command line spells. This lint is the backstop, and this rule
+// is what keeps the control from being dropped or switched off.
+//
+// A job is covered when it runs an npm command (the rule above) or installs a Node toolchain
+// (actions/setup-node), since that is a job that goes on to run npm.
+// OPT-OUTS: setting the variable to anything but true anywhere (job or step env) is an
+// opt-out. It is allowed only if file:job is listed here AND the line directly above it carries
+// `opt-out reason:`. The list is pinned EMPTY: no job needs a dependency lifecycle script, and
+// adding one is an edit to this suite, which is the review point.
+const OPT_OUTS = [];
+const IGNORE_ENV = /^\s*["']?npm_config_ignore[-_]scripts["']?\s*:\s*(.*?)\s*(?:#.*)?$/i;
+const isTrue = (v) => /^(["']?)true\1$/.test(v);
+
+// Jobs: each `  name:` key at indent 2 under `jobs:`, up to the next one.
+function jobBlocks(text) {
+  const lines = text.split('\n');
+  const at = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+  if (at < 0) return [];
+  const out = [];
+  for (let i = at + 1; i < lines.length; i++) {
+    const m = lines[i].match(/^  ([\w-]+):\s*$/);
+    if (!m) continue;
+    let j = i + 1;
+    while (j < lines.length && !/^  [\w-]+:\s*$/.test(lines[j]) && !/^\S/.test(lines[j])) j++;
+    out.push({ name: m[1], line: i + 1, lines: lines.slice(i, j) });
+  }
+  return out;
+}
+
+export function jobEnvViolations(file, text, optOuts = OPT_OUTS) {
+  const v = [];
+  for (const job of jobBlocks(text)) {
+    const body = job.lines.join('\n');
+    const runsNpm = steps(body).some((st) => NPM_CMD.test(joinContinuations(runText(st)))) || /uses:\s*actions\/setup-node@/.test(body);
+    // Job-level env: a `    env:` at indent 4, then the indented lines under it.
+    let jobTrue = false;
+    for (let k = 0; k < job.lines.length; k++) {
+      if (/^    env:\s*(#.*)?$/.test(job.lines[k])) {
+        for (let q = k + 1; q < job.lines.length && (job.lines[q].trim() === '' || indentOf(job.lines[q]) > 4); q++) {
+          const m = job.lines[q].match(IGNORE_ENV);
+          if (m && isTrue(m[1])) jobTrue = true;
+        }
+      }
+    }
+    // Any setting that is not true, at any depth in the job, is an opt-out.
+    job.lines.forEach((ln, k) => {
+      const m = ln.match(IGNORE_ENV);
+      if (!m || isTrue(m[1])) return;
+      const where = `${file}:${job.line + k}`;
+      if (!optOuts.includes(`${file}:${job.name}`)) {
+        v.push(`${where}: npm_config_ignore_scripts is set to ${m[1] || 'an empty value'}, an opt-out, in job ${job.name} which is not in the pinned opt-out list`);
+      } else if (!/opt-out reason:/.test(job.lines[k - 1] ?? '')) {
+        v.push(`${where}: the opt-out in job ${job.name} has no 'opt-out reason:' comment on the line above`);
+      }
+    });
+    const opted = optOuts.includes(`${file}:${job.name}`);
+    if (runsNpm && !jobTrue && !opted) {
+      v.push(`${file}:${job.line}: job ${job.name} runs npm but does not set job-level npm_config_ignore_scripts: "true"`);
+    }
+  }
+  // A flow-style env mapping hides the key from the line reader above.
+  text.split('\n').forEach((l, i) => { if (/^\s*env:\s*\{/.test(l)) v.push(`${file}:${i + 1}: flow-style env is not read by this checker; write block style`); });
+  return v;
+}
+
 export function violations(file, text) {
   const v = [];
+  v.push(...jobEnvViolations(file, text));
   for (const [, n] of flowStyle(text)) v.push(`${file}:${n}: flow-style YAML (a { } step or steps: [ ]) is not read by this checker; write block style`);
   const all = steps(text);
   all.forEach((s, idx) => {
@@ -168,6 +237,7 @@ const no = (m, d) => { fail++; console.log(`  FAIL ${m}`); if (d) console.log(` 
 
 // --- the real workflows are clean, and we really read them ----------------
 const files = readdirSync(wfDir).filter(isWorkflowFile).sort();
+let jobsRead = 0, coveredJobs = 0;
 let stepCount = 0, checkouts = 0, installs = 0, runBlocks = 0, readers = 0;
 for (const f of files) {
   const text = readFileSync(path.join(wfDir, f), 'utf8');
@@ -179,10 +249,15 @@ for (const f of files) {
     if (NPM_CMD.test(rt)) installs++;
     if (rt.includes('scripts/ci/read-quest-version.sh')) readers++;
   }
+  jobsRead += jobBlocks(text).length;
+  coveredJobs += jobBlocks(text).filter((j) => /actions\/setup-node@/.test(j.lines.join('\n'))).length;
   const v = violations(f, text);
   v.length === 0 ? ok(`${f}: no hardening violations`) : v.forEach((x) => no(x));
 }
 // Positive control: a reader that found nothing would also report no violations.
+jobsRead >= 5 ? ok(`read ${jobsRead} jobs`) : no(`read only ${jobsRead} jobs`);
+// All three npm-running jobs in ci.yml are covered, so the job rule had something to judge.
+coveredJobs === 3 ? ok('found all 3 setup-node jobs, each held to the job-level variable') : no(`expected 3 setup-node jobs, found ${coveredJobs}`);
 stepCount >= 25 ? ok(`read ${stepCount} steps across ${files.length} workflows`) : no(`read only ${stepCount} steps; the reader is not seeing the workflows`);
 checkouts === 4 ? ok('found all 4 actions/checkout steps') : no(`expected 4 checkout steps, found ${checkouts}`);
 installs === 2 ? ok('found both npm install steps') : no(`expected 2 npm install steps, found ${installs}`);
@@ -192,7 +267,9 @@ runBlocks >= 10 ? ok(`read ${runBlocks} run: bodies`) : no(`read only ${runBlock
 // --- each rule rejects its own bad fixture --------------------------------
 const CHECK = '      - name: c\n        run: bash scripts/ci/assert-no-persisted-credential.sh\n';
 const CO = '      - uses: actions/checkout@v4\n        with:\n          persist-credentials: false\n';
-const wrap = (steps) => `jobs:\n  a:\n    steps:\n${steps}`;
+// OMARK-109: every fixture job carries the job-level variable, so the older cases keep
+// testing the rule they were written for and not the job rule.
+const wrap = (steps) => `jobs:\n  a:\n    env:\n      npm_config_ignore_scripts: "true"\n    steps:\n${steps}`;
 const bad = {
   'checkout without persist-credentials: false': ['persist-credentials', wrap('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n' + CHECK)],
   'checkout not followed by the credential check': ['does not run scripts/ci/assert-no-persisted-credential.sh', wrap(CO + '      - name: x\n        run: echo hi\n')],
@@ -272,6 +349,45 @@ for (const [label, [needle, text]] of Object.entries(bad)) {
   const v = violations('fixture.yml', text);
   v.some((x) => x.includes(needle)) ? ok(`rejects: ${label}`) : no(`did NOT reject: ${label}`, JSON.stringify(v));
 }
+// --- OMARK-109: the job-level variable --------------------------------------
+const ENVT = '    env:\n      npm_config_ignore_scripts: "true"\n';
+const job = (name, extra, steps2) => `jobs:\n  ${name}:\n    runs-on: ubuntu-latest\n${extra}    steps:\n${steps2}`;
+const NPMSTEP = '      - name: i\n        run: npm install -g --ignore-scripts x\n';
+const jv = (file, t, o) => jobEnvViolations(file, t, o);
+const jbad = {
+  'a job that runs npm with no job-level variable': ['does not set job-level', job('a', '', NPMSTEP)],
+  'a setup-node job with no job-level variable': ['does not set job-level', job('a', '', '      - uses: actions/setup-node@v4\n')],
+  'the variable only at step level (not the job)': ['does not set job-level', job('a', '', '      - name: i\n        env:\n          npm_config_ignore_scripts: "true"\n        run: npm ci --ignore-scripts\n')],
+  'the variable set to "false" at job level': ['an opt-out', job('a', '    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP)],
+  'the variable set to false at step level in a job that otherwise sets it': ['an opt-out', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore_scripts: false\n        run: npm ci --ignore-scripts\n')],
+  'the hyphen spelling set to 0': ['an opt-out', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore-scripts: "0"\n        run: npm ci --ignore-scripts\n')],
+  'an empty value': ['an opt-out', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore_scripts:\n        run: npm ci --ignore-scripts\n')],
+  'a flow-style env mapping': ['flow-style env', job('a', '    env: { npm_config_ignore_scripts: "true" }\n', NPMSTEP)],
+};
+for (const [label, [needle, t]] of Object.entries(jbad)) {
+  const r = jv('fixture.yml', t);
+  r.some((x) => x.includes(needle)) ? ok(`job rule rejects: ${label}`) : no(`job rule did NOT reject: ${label}`, JSON.stringify(r));
+}
+// Accepting side: the rule is not a blanket.
+for (const [label, t, o] of [
+  ['a job with the variable at job level, as "true"', job('a', ENVT, NPMSTEP)],
+  ['an unquoted true', job('a', '    env:\n      npm_config_ignore_scripts: true\n', NPMSTEP)],
+  ['a job that runs no npm and has no setup-node', job('a', '', '      - name: x\n        run: echo hi\n')],
+  ['the variable true at job level and again at step level', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore_scripts: "true"\n        run: npm ci --ignore-scripts\n')],
+  ['a listed opt-out with its reason on the line above', job('a', '    env:\n      # opt-out reason: this job exercises a dependency postinstall on purpose\n      npm_config_ignore_scripts: "false"\n', NPMSTEP), ['fixture.yml:a']],
+]) {
+  const r = jv('fixture.yml', t, o);
+  r.length === 0 ? ok(`job rule accepts: ${label}`) : no(`job rule rejected: ${label}`, JSON.stringify(r));
+}
+// A listed opt-out WITHOUT its reason is still refused.
+{
+  const t = job('a', '    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP);
+  const r = jv('fixture.yml', t, ['fixture.yml:a']);
+  r.some((x) => x.includes("no 'opt-out reason:'")) ? ok('job rule refuses a listed opt-out with no reason') : no('job rule accepted a listed opt-out with no reason', JSON.stringify(r));
+}
+// The pinned list is empty today.
+OPT_OUTS.length === 0 ? ok('the pinned opt-out list is empty') : no(`the opt-out list is not empty: ${OPT_OUTS}`);
+
 // And a matching good fixture passes, so the rejections are not blanket.
 const good = wrap(CO + CHECK + '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: npm install -g --ignore-scripts "x@$V"\n      - name: q\n        run: v="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"\n');
 violations('good.yml', good).length === 0 ? ok('accepts a compliant fixture') : no('rejected a compliant fixture', JSON.stringify(violations('good.yml', good)));
@@ -320,5 +436,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 95) { console.log('ran fewer than the 95 expected passing cases'); process.exit(1); }
+if (pass < 112) { console.log('ran fewer than the 112 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
