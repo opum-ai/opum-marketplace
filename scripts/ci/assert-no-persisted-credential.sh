@@ -39,4 +39,19 @@ if [ -n "$found" ]; then
   echo "::error::the checkout persisted a credential in the local git config, which may be .git/config itself or a file it includes (key(s): $(printf '%s' "$found" | tr '\n' ' ')). Set 'persist-credentials: false' on that actions/checkout step. The value is deliberately not printed."
   exit 1
 fi
+# OMARK-106 LOW-5: with extensions.worktreeConfig, a worktree's own settings live in
+# config.worktree, which `--local` does not read. Read that file too when it exists.
+# (url.*.insteadOf rewrites, a token in remote.origin.url and credential.helper are
+# not read: INFO-level, declined on OMARK-106.)
+wt_file="$(git rev-parse --git-path config.worktree)"
+if [ -f "$wt_file" ]; then
+  if ! wt_found="$(git config --file "$wt_file" --includes --name-only --get-regexp 'http\..*extraheader' || [ $? -eq 1 ])"; then
+    echo "::error::could not read $wt_file, so a persisted credential in the worktree config cannot be ruled out."
+    exit 1
+  fi
+  if [ -n "$wt_found" ]; then
+    echo "::error::the checkout persisted a credential in the worktree git config ($wt_file) (key(s): $(printf '%s' "$wt_found" | tr '\n' ' ')). Set 'persist-credentials: false' on that actions/checkout step. The value is deliberately not printed."
+    exit 1
+  fi
+fi
 echo "no persisted credential: read $nkeys local git config key(s), none matching http.*.extraheader."

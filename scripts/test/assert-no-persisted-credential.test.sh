@@ -64,7 +64,21 @@ run_in "$S/incif"
 grep -qF 'c2VjcmV0LXZhbHVl' <<<"$OUT" && no 'the includeIf credential value was printed' "$OUT" || ok 'the includeIf credential value is not printed'
 grep -qF 'or a file it includes' <<<"$OUT" && ok 'the failure message says the credential may be in an included file' || no 'the message still names only .git/config' "$OUT"
 
+# OMARK-106 LOW-5: extensions.worktreeConfig moves a worktree's settings into
+# .git/config.worktree, which `git config --local` does not read.
+mkdir "$S/wtcfg" && git init -q "$S/wtcfg"
+git -C "$S/wtcfg" config --local extensions.worktreeConfig true
+git config --file "$S/wtcfg/.git/config.worktree" http.https://github.com/.extraheader "$SECRET"
+run_in "$S/wtcfg"
+{ [ "$RC" -eq 1 ] && grep -qF 'worktree git config' <<<"$OUT" && grep -qF 'http.https://github.com/.extraheader' <<<"$OUT"; } && ok 'an extraheader in config.worktree fails by name' || no "worktree-config extraheader: exit $RC" "$OUT"
+grep -qF 'c2VjcmV0LXZhbHVl' <<<"$OUT" && no 'the worktree credential value was printed' "$OUT" || ok 'the worktree credential value is not printed'
+mkdir "$S/wtclean" && git init -q "$S/wtclean"
+git -C "$S/wtclean" config --local extensions.worktreeConfig true
+git config --file "$S/wtclean/.git/config.worktree" core.sparseCheckout false
+run_in "$S/wtclean"
+{ [ "$RC" -eq 0 ] && grep -qF 'no persisted credential: read' <<<"$OUT"; } && ok 'a benign config.worktree passes' || no "benign worktree config: exit $RC" "$OUT"
+
 echo
 echo "passed $pass, failed $fail"
-[ "$pass" -ge 12 ] || { echo "ran fewer than the 12 expected passing cases"; exit 1; }
+[ "$pass" -ge 15 ] || { echo "ran fewer than the 15 expected passing cases"; exit 1; }
 [ "$fail" -eq 0 ]

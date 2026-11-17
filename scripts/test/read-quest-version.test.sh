@@ -92,6 +92,12 @@ block 'This project uses Quest CLI 0.14.1 for tracker operations.' | sed 's/$/\r
 check 'CRLF line endings are named as the cause' "$S/crlf.md" 1 "carriage returns (CRLF line endings)"
 check 'missing file fails by name' "$S/does-not-exist.md" 1 "does not exist"
 
+# OMARK-106 LOW-6: a block holding only whitespace is empty, not "no Quest CLI line".
+printf '%s\n   \n\t\n\n%s\n' "$BEGIN" "$END" > "$S/blank.md"
+check 'a whitespace-only block fails as an empty block' "$S/blank.md" 1 "is empty"
+out="$(bash "$READER" "$S/blank.md" 2>&1)"
+grep -qF "no 'Quest CLI" <<<"$out" && no 'a whitespace-only block was reported as a missing version line' 1 "$out" || ok 'a whitespace-only block is not reported as a missing version line'
+
 # 5. the repository's real CLAUDE.md must read cleanly: a positive control that
 #    the suite measured the live file and not only its own fixtures.
 live="$(bash "$READER" "$HERE/../../CLAUDE.md" 2>&1)"; rc=$?
@@ -100,5 +106,5 @@ if [ "$rc" -eq 0 ] && [[ "$live" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then ok "live C
 echo
 echo "passed $pass, failed $fail"
 # A suite that ran fewer cases than it was written for must not pass.
-[ "$pass" -ge 21 ] || { echo "ran fewer than the 21 expected passing cases"; exit 1; }
+[ "$pass" -ge 23 ] || { echo "ran fewer than the 23 expected passing cases"; exit 1; }
 [ "$fail" -eq 0 ]

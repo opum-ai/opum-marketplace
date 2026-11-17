@@ -26,7 +26,9 @@ function steps(text) {
     // Every key a step may open with. A step that begins `- shell:` or
     // `- working-directory:` would otherwise be skipped entirely and every rule
     // below would never see it (OMARK-102 finding 4).
-    const m = lines[i].match(/^(\s*)- (name|uses|run|id|if|env|with|shell|working-directory|timeout-minutes|continue-on-error)\b/);
+    // `-\s+` and an optionally quoted key: `-  run:` and `- "run":` are the same step
+    // (OMARK-106 LOW-4).
+    const m = lines[i].match(/^(\s*)-\s+["']?(name|uses|run|id|if|env|with|shell|working-directory|timeout-minutes|continue-on-error)["']?\s*:/);
     if (!m) continue;
     const ind = m[1].length;
     let j = i + 1;
@@ -41,10 +43,15 @@ function runText(step) {
   const out = [];
   const L = step.lines;
   for (let k = 0; k < L.length; k++) {
-    const m = L[k].match(/^(\s*)(?:- )?run:\s*(.*)$/);
+    // Optional quotes around the key and any run of spaces after the dash (OMARK-106 LOW-4).
+    const m = L[k].match(/^(\s*)(-\s+)?["']?run["']?\s*:\s*(.*)$/);
     if (!m) continue;
-    const ind = m[1].length + (L[k].trimStart().startsWith('- ') ? 2 : 0);
-    if (m[2] && !/^[|>][-+]?$/.test(m[2])) { out.push(m[2]); continue; }
+    const ind = m[1].length + (m[2] ? m[2].length : 0);
+    // A block-scalar header: | or > with an optional chomping (-/+) and indentation
+    // indicator (1-9) in either order, then an optional comment. The old test accepted only
+    // a bare marker, so `run: |2` or `run: | # note` was read as a one-line value
+    // and the body below it was never scanned (OMARK-106 LOW-4).
+    if (m[3] && !/^[|>](?:[1-9][-+]?|[-+][1-9]?)?\s*(?:#.*)?$/.test(m[3])) { out.push(m[3]); continue; }
     for (let q = k + 1; q < L.length; q++) {
       if (L[q].trim() !== '' && indentOf(L[q]) <= ind) break;
       out.push(L[q]);
@@ -57,27 +64,67 @@ function runText(step) {
 // line, or `npm install \\\n  -g pkg` hides its -g on the next physical line.
 const joinContinuations = (t) => t.replace(/\\\n\s*/g, ' ');
 
-// The npm subcommands LISTED in the alternation below (install, i, add, ci, exec, x,
-// rebuild, rb, install-test, it, install-ci-test, cit), plus npx, wherever the flags
-// sit: `npm -g install` puts a flag BEFORE the subcommand, so the subcommand is
-// looked for anywhere later in the same shell command (up to ; & | or a newline).
-// This is NOT every npm subcommand that can run a lifecycle script, and it does not
-// try to be: update, dedupe, link, init and others are not listed (OMARK-102 finding 3;
-// the remainder is recorded on the follow-up task).
-const NPM_CMD = /(^|[\s;&|(])(npm\b[^;&|\n]*?\s(install|i|add|ci|exec|x|rebuild|rb|install-test|it|install-ci-test|cit)\b|npx\b)/;
+// OMARK-106 LOW-3: the rules below run per SHELL COMMAND, not per line, and over text with
+// comments removed. `npm ci --ignore-scripts && npm rebuild` is two commands and only the
+// first carries the flag; `npm install # --ignore-scripts` carries it only in a comment.
+// A `#` starts a comment only at the start of a line or after whitespace (so `$#` and
+// `${x#y}` survive). A `#` inside quotes after a space is also cut, which can only drop a
+// flag and so can only over-report, never hide a violation.
+const stripComment = (ln) => ln.replace(/(^|\s)#.*$/, '$1');
+// Split on ; && || | and a lone & (a newline already ended the line).
+export const commands = (run) => run.split('\n').flatMap((ln) => stripComment(ln).split(/&&|\|\||[;&|]/)).map((c) => c.trim()).filter(Boolean);
+
+// The npm binary as a command word, whether bare, quoted or path-prefixed (`"npm"`,
+// `/usr/bin/npm`, `./node_modules/.bin/npm`): OMARK-106 LOW-2. `npx` is always a risk.
+const NPM_TOKEN = /(?:^|[\s(`])["']?(?:[^\s"'()`]*\/)?(npx|npm)["']?(?=\s|$)/;
+// The npm subcommands that can run a dependency's lifecycle script, including their
+// aliases and the abbreviations npm accepts (install: i in ins inst insta instal isnt;
+// clean-install: ci ic isntall-clean sit; install-test: it; install-ci-test: cit;
+// update: up upgrade udpate; dedupe: ddp find-dupes; link: ln; init: innit; create; exec: x;
+// rebuild: rb), plus `audit fix`. NOT listed on purpose, and recorded on OMARK-106:
+// run / test / start (they run the ROOT package's own scripts, not a dependency's) and
+// pack / publish / version (they run the root package's lifecycle only).
+const NPM_SUB = /(?:^|\s)["']?(?:i|in|ins|inst|insta|instal|install|isntall|add|ci|clean-install|ic|install-clean|isntall-clean|sit|install-test|it|cit|install-ci-test|update|up|upgrade|udpate|dedupe|ddp|find-dupes|link|ln|init|innit|create|exec|x|rebuild|rb)["']?(?=\s|$)|(?:^|\s)audit\s+fix\b/;
+export const npmRisk = (cmd) => {
+  const m = cmd.match(NPM_TOKEN);
+  if (!m) return false;
+  if (m[1] === 'npx') return true;
+  return NPM_SUB.test(cmd.slice(m.index + m[0].length));
+};
 
 // --ignore-scripts must be present AND not switched back off: `--ignore-scripts=false`
 // contains the word and means the opposite (OMARK-102 finding 2).
 // A DENYLIST of off-values (=false, =0) is evadable (=00, =null, an empty =), so this
-// is an allowlist over EVERY occurrence on the line: each must be exactly the bare
+// is an allowlist over EVERY occurrence in the command: each must be exactly the bare
 // flag or =true, and at least one must exist (review LOW-1).
-const hasIgnoreScripts = (ln) => {
-  const occ = (ln.match(/(?:^|\s)["']?--(?:no-)?ignore-scripts\S*/g) ?? []).map((o) => o.trim().replace(/^["']|["']$/g, ''));
-  return occ.length > 0 && occ.every((o) => o === '--ignore-scripts' || o === '--ignore-scripts=true');
+// OMARK-106: an occurrence is the whole whitespace-delimited token, so a prefix stuck to the
+// flag (`''--ignore-scripts=false`, `\\--ignore-scripts=false`) is not the bare flag and is
+// refused; and a bare flag followed by a boolean-looking word (`--ignore-scripts false`) is
+// refused too, because npm's option parser reads that next word as the flag's value.
+const hasIgnoreScripts = (cmd) => {
+  const re = /\S*--(?:no-)?ignore-scripts\S*/g;
+  const occ = [...cmd.matchAll(re)];
+  if (occ.length === 0) return false;
+  return occ.every((m) => {
+    const tok = m[0].replace(/^["']|["']$/g, '');
+    if (tok === '--ignore-scripts=true') return true;
+    if (tok !== '--ignore-scripts') return false;
+    return !/^\s+["']?(true|false|null|undefined|[0-9]+)["']?(?=\s|$)/i.test(cmd.slice(m.index + m[0].length));
+  });
 };
+
+// Flow-style YAML (`- { run: npm ci }`, `steps: [ ... ]`) is not a layout this line reader
+// understands, so it is refused outright rather than read as a step-less file
+// (OMARK-106 LOW-4).
+const flowStyle = (text) => text.split('\n').map((l, i) => [l, i + 1])
+  .filter(([l]) => !/^\s*#/.test(l) && (/^\s*-\s*\{/.test(l) || /^\s*["']?steps["']?\s*:\s*\[/.test(l) || /\{[^}]*\brun\s*:/.test(l)));
+
+// Workflow files are *.yml AND *.yaml (OMARK-106 LOW-4: the .yml-only filter skipped .yaml).
+export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 
 export function violations(file, text) {
   const v = [];
+  for (const [, n] of flowStyle(text)) v.push(`${file}:${n}: flow-style YAML (a { } step or steps: [ ]) is not read by this checker; write block style`);
   const all = steps(text);
   all.forEach((s, idx) => {
     const body = s.lines.join('\n');
@@ -99,9 +146,9 @@ export function violations(file, text) {
     }
     // Item 1: any npm install/ci/exec or npx, global or not, must not run dependency
     // lifecycle scripts.
-    for (const ln of run.split('\n')) {
-      if (NPM_CMD.test(ln) && !hasIgnoreScripts(ln)) {
-        v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${ln.trim()}`);
+    for (const cmd of commands(run)) {
+      if (npmRisk(cmd) && !hasIgnoreScripts(cmd)) {
+        v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${cmd}`);
       }
     }
     // Item 3: the Quest version is read by the one bounded script and by nothing
@@ -122,7 +169,7 @@ const ok = (m) => { pass++; console.log(`  ok   ${m}`); };
 const no = (m, d) => { fail++; console.log(`  FAIL ${m}`); if (d) console.log(`       | ${d}`); };
 
 // --- the real workflows are clean, and we really read them ----------------
-const files = readdirSync(wfDir).filter((f) => f.endsWith('.yml')).sort();
+const files = readdirSync(wfDir).filter(isWorkflowFile).sort();
 let stepCount = 0, checkouts = 0, installs = 0, runBlocks = 0, readers = 0;
 for (const f of files) {
   const text = readFileSync(path.join(wfDir, f), 'utf8');
@@ -131,7 +178,7 @@ for (const f of files) {
     const rt = joinContinuations(runText(s));
     if (/uses:\s*actions\/checkout@/.test(s.lines.join('\n'))) checkouts++;
     if (rt) runBlocks++;
-    if (NPM_CMD.test(rt)) installs++;
+    if (commands(rt).some(npmRisk)) installs++;
     if (rt.includes('scripts/ci/read-quest-version.sh')) readers++;
   }
   const v = violations(f, text);
@@ -172,6 +219,33 @@ const bad = {
   'a step opening with shell: (npm ci inside it)': ['without --ignore-scripts', wrap('      - shell: bash\n        run: npm ci\n')],
   'a step opening with working-directory: (npm ci inside it)': ['without --ignore-scripts', wrap('      - working-directory: sub\n        run: npm ci\n')],
   'a step opening with timeout-minutes: carrying a ${{ }} in run:': ['interpolated inside run', wrap('      - timeout-minutes: 5\n        run: echo "${{ github.base_ref }}"\n')],
+  // OMARK-106. Each needle is the rule's own wording.
+  'LOW-3: the flag on one command, a later npm rebuild without it (&&)': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci --ignore-scripts && npm rebuild\n')],
+  'LOW-3: the flag on one command, a later npm install after ;': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci --ignore-scripts; npm install x\n')],
+  'LOW-3: the flag only inside a trailing comment': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install x # --ignore-scripts\n')],
+  'LOW-3: the flag only in a whole-line comment in a block': ['without --ignore-scripts', wrap('      - name: i\n        run: |\n          # --ignore-scripts\n          npm ci\n')],
+  'LOW-4: two spaces after the step dash': ['without --ignore-scripts', wrap('      -  run: npm ci\n')],
+  'LOW-4: a quoted run key': ['without --ignore-scripts', wrap('      - "run": npm ci\n')],
+  'LOW-4: a flow-style step': ['flow-style YAML', wrap('      - { run: npm ci }\n')],
+  'LOW-4: a flow-style steps list': ['flow-style YAML', 'jobs:\n  a:\n    steps: [ { run: npm ci } ]\n'],
+  'LOW-4: a block scalar with an indentation indicator': ['without --ignore-scripts', wrap('      - name: i\n        run: |2\n          npm ci\n')],
+  'LOW-4: a block scalar with a trailing comment after the marker': ['without --ignore-scripts', wrap('      - name: i\n        run: | # note\n          npm ci\n')],
+  'LOW-4: a block scalar with chomping and a comment (>-)': ['without --ignore-scripts', wrap('      - name: i\n        run: >- # note\n          npm ci\n')],
+  'LOW-2: npm update': ['without --ignore-scripts', wrap('      - name: i\n        run: npm update\n')],
+  'LOW-2: npm dedupe': ['without --ignore-scripts', wrap('      - name: i\n        run: npm dedupe\n')],
+  'LOW-2: npm audit fix': ['without --ignore-scripts', wrap('      - name: i\n        run: npm audit fix\n')],
+  'LOW-2: npm link': ['without --ignore-scripts', wrap('      - name: i\n        run: npm link\n')],
+  'LOW-2: npm install abbreviation ins': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ins x\n')],
+  'LOW-2: npm ic': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ic\n')],
+  'LOW-2: npm sit': ['without --ignore-scripts', wrap('      - name: i\n        run: npm sit\n')],
+  'LOW-2: npm init': ['without --ignore-scripts', wrap('      - name: i\n        run: npm init x\n')],
+  'LOW-2: npm create': ['without --ignore-scripts', wrap('      - name: i\n        run: npm create x\n')],
+  'LOW-2: a quoted npm': ['without --ignore-scripts', wrap('      - name: i\n        run: "npm" ci\n')],
+  'LOW-2: a path-prefixed npm': ['without --ignore-scripts', wrap('      - name: i\n        run: /usr/bin/npm ci\n')],
+  'LOW-2: a node_modules/.bin npm': ['without --ignore-scripts', wrap('      - name: i\n        run: ./node_modules/.bin/npm ci\n')],
+  'R2-3: a bare --ignore-scripts then the word false': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts false "x"\n')],
+  'R2-4: a bare flag, then empty quotes stuck to a false one': ['without --ignore-scripts', wrap("      - name: i\n        run: npm install -g --ignore-scripts ''--ignore-scripts=false x\n")],
+  'R2-4: a bare flag, then a backslash stuck to a false one': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts \\--ignore-scripts=false x\n')],
   'Quest version read by sed': ['names the', wrap("      - name: q\n        run: |\n          v=\"$(sed -n 's/.*Quest CLI \\([0-9.]*\\).*/\\1/p' CLAUDE.md)\"\n")],
   'Quest version read by grep (not sed)': ['reads CLAUDE.md without', wrap("      - name: q\n        run: v=\"$(grep -o '[0-9][0-9.]*' CLAUDE.md | head -1)\"\n")],
   'Quest version read by awk naming the phrase': ['names the', wrap("      - name: q\n        run: awk '/Quest CLI/ {print $4}' x\n")],
@@ -195,12 +269,33 @@ for (const [label, run] of [
   ['--ignore-scripts=true', 'npm install -g --ignore-scripts=true "x@1.2.3"'],
   ['npm rebuild with --ignore-scripts', 'npm rebuild --ignore-scripts'],
   ['a non-install npm command', 'npm --version'],
+  ['the flag followed by a trailing comment', 'npm ci --ignore-scripts # why'],
+  ['the flag on every command of a && chain', 'npm ci --ignore-scripts && npm rebuild --ignore-scripts'],
+  ['npm audit with no fix', 'npm audit'],
+  ['npm update with the flag', 'npm update --ignore-scripts'],
+  ['a path-prefixed npm with the flag', '/usr/bin/npm ci --ignore-scripts'],
+  ['a quoted run value', '"npm ci --ignore-scripts"'],
+  ['a quoted flag', 'npm ci "--ignore-scripts"'],
   ['a repeated --ignore-scripts and --ignore-scripts=true', 'npm install -g --ignore-scripts --ignore-scripts=true "x@1.2.3"'],
 ]) {
   const t = wrap(CO + CHECK + `      - shell: bash\n        run: ${run}\n`);
   violations('goodflag.yml', t).length === 0 ? ok(`accepts: ${label}`) : no(`rejected a compliant form: ${label}`, JSON.stringify(violations('goodflag.yml', t)));
 }
 
+// OMARK-106 LOW-4, accepting side: the layouts the reader was widened to understand must
+// still pass when compliant, so the widening is not a blanket rejection.
+for (const [label, t] of [
+  ['two spaces after the dash', wrap(CO + CHECK + '      -  run: npm ci --ignore-scripts\n')],
+  ['a quoted run key', wrap(CO + CHECK + '      - "run": npm ci --ignore-scripts\n')],
+  ['an indentation indicator', wrap(CO + CHECK + '      - name: i\n        run: |2\n          npm ci --ignore-scripts\n')],
+  ['a trailing comment after the block marker', wrap(CO + CHECK + '      - name: i\n        run: | # note\n          npm ci --ignore-scripts\n')],
+]) {
+  violations('goodlayout.yml', t).length === 0 ? ok(`accepts layout: ${label}`) : no(`rejected a compliant layout: ${label}`, JSON.stringify(violations('goodlayout.yml', t)));
+}
+// The file filter takes both extensions and nothing else.
+['a.yml', 'a.yaml'].every(isWorkflowFile) && !['a.yml.bak', 'a.json', 'yaml'].some(isWorkflowFile)
+  ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
+
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 38) { console.log('ran fewer than the 38 expected passing cases'); process.exit(1); }
+if (pass < 76) { console.log('ran fewer than the 76 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
