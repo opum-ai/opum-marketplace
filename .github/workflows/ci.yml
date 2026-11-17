@@ -28,6 +28,13 @@ jobs:
   manifest:
     name: check · manifests
     runs-on: ubuntu-latest
+    # OMARK-109 (DEC-240, opum-doc ruling A): npm skips dependency lifecycle scripts for every
+    # command in this job whatever the command line spells, so --ignore-scripts on the install
+    # lines is a second control and scripts/test/workflow-hardening.test.mjs is the backstop that
+    # keeps this line from being dropped. No job opts out; the proof below sets the variable
+    # itself for its control arm.
+    env:
+      npm_config_ignore_scripts: "true"
     steps:
       # fetch-depth: 0, deliberately. The default shallow checkout has no merge
       # base with the base branch, so the diff below exits 128 instead of
@@ -257,6 +264,13 @@ jobs:
   lore-check:
     name: lore check
     runs-on: ubuntu-latest
+    # OMARK-109 (DEC-240, opum-doc ruling A): npm skips dependency lifecycle scripts for every
+    # command in this job whatever the command line spells, so --ignore-scripts on the install
+    # lines is a second control and scripts/test/workflow-hardening.test.mjs is the backstop that
+    # keeps this line from being dropped. No job opts out; the proof below sets the variable
+    # itself for its control arm.
+    env:
+      npm_config_ignore_scripts: "true"
     steps:
       # persist-credentials: false (DEC-240 item 2): this job pushes nothing and
       # needs no token after checkout.
@@ -338,6 +352,13 @@ jobs:
   tracker:
     name: Tracker integrity
     runs-on: ubuntu-latest
+    # OMARK-109 (DEC-240, opum-doc ruling A): npm skips dependency lifecycle scripts for every
+    # command in this job whatever the command line spells, so --ignore-scripts on the install
+    # lines is a second control and scripts/test/workflow-hardening.test.mjs is the backstop that
+    # keeps this line from being dropped. No job opts out; the proof below sets the variable
+    # itself for its control arm.
+    env:
+      npm_config_ignore_scripts: "true"
     steps:
       # persist-credentials: false (DEC-240 item 2): no push, no token needed
       # after checkout.
