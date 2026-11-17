@@ -78,7 +78,14 @@ git config --file "$S/wtclean/.git/config.worktree" core.sparseCheckout false
 run_in "$S/wtclean"
 { [ "$RC" -eq 0 ] && grep -qF 'no persisted credential: read' <<<"$OUT"; } && ok 'a benign config.worktree passes' || no "benign worktree config: exit $RC" "$OUT"
 
+# Review nit 5: a config.worktree that cannot be parsed is not evidence of a clean one.
+mkdir "$S/wtbad" && git init -q "$S/wtbad"
+git -C "$S/wtbad" config --local extensions.worktreeConfig true
+printf '[broken\n' > "$S/wtbad/.git/config.worktree"
+run_in "$S/wtbad"
+{ [ "$RC" -eq 1 ] && ! grep -qF 'no persisted credential: read' <<<"$OUT"; } && ok 'an unparseable config.worktree fails closed' || no "malformed worktree config: exit $RC" "$OUT"
+
 echo
 echo "passed $pass, failed $fail"
-[ "$pass" -ge 15 ] || { echo "ran fewer than the 15 expected passing cases"; exit 1; }
+[ "$pass" -ge 16 ] || { echo "ran fewer than the 16 expected passing cases"; exit 1; }
 [ "$fail" -eq 0 ]

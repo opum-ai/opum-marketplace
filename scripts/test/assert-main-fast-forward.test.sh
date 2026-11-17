@@ -442,14 +442,14 @@ grep -qE '^\s*persist-credentials:\s*false\s*$' <<<"$depth" \
 # itself failed (a bad ERE) - the caller must not read 2 as "none".
 TOKEN_RE='secrets\b|github[.[]token|github\[|tojson\([[:space:]]*github|[a-z_]*token[a-z_]*[[:space:]]*:|github\.\*|github[[:space:]]*[,)]|\$\{\{[^}]*$'
 token_scan() { grep -qiE -- "${2:-$TOKEN_RE}" <<<"$1"; }
-depth_raw=$(cat "$HERE/../../.github/workflows/promotion-guards.yml")
-[ -n "$depth_raw" ] && ok "read the whole promotion-guards workflow's raw text for the token scan ($(printf '%s' "$depth_raw" | grep -c .) non-empty lines)" \
+wf_raw=$(cat "$HERE/../../.github/workflows/promotion-guards.yml")
+[ -n "$wf_raw" ] && ok "read the whole promotion-guards workflow's raw text for the token scan ($(printf '%s' "$wf_raw" | grep -c .) non-empty lines)" \
   || no "the workflow's raw text was empty, so the token scan would read nothing" 1 ""
-token_scan "$depth_raw"; rc=$?
+token_scan "$wf_raw"; rc=$?
 case "$rc" in
   1) ok "the workflow passes no token anywhere (the guard reads origin/dev from the checkout)" ;;
-  0) no "the workflow references a secret or token" 1 "$depth_raw" ;;
-  *) no "the token scan itself failed (grep exit $rc), so 'no token' cannot be claimed" "$rc" "$depth_raw" ;;
+  0) no "the workflow references a secret or token" 1 "$wf_raw" ;;
+  *) no "the token scan itself failed (grep exit $rc), so 'no token' cannot be claimed" "$rc" "$wf_raw" ;;
 esac
 # Positive control, in the suite: each way of reaching a credential must FIRE the
 # predicate. Each fixture is a line a workflow could carry.

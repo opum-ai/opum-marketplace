@@ -64,19 +64,25 @@ function runText(step) {
 // line, or `npm install \\\n  -g pkg` hides its -g on the next physical line.
 const joinContinuations = (t) => t.replace(/\\\n\s*/g, ' ');
 
-// OMARK-106 LOW-3: the rules below run per SHELL COMMAND, not per line, and over text with
-// comments removed. `npm ci --ignore-scripts && npm rebuild` is two commands and only the
-// first carries the flag; `npm install # --ignore-scripts` carries it only in a comment.
-// A `#` starts a comment only at the start of a line or after whitespace (so `$#` and
-// `${x#y}` survive). A `#` inside quotes after a space is also cut, which can only drop a
-// flag and so can only over-report, never hide a violation.
+// OMARK-106 LOW-3: the rules below run per SHELL COMMAND, not per line, and look for the
+// flag with comments removed. `npm ci --ignore-scripts && npm rebuild` is two commands and
+// only the first carries the flag; `npm install # --ignore-scripts` carries it only in a
+// comment. A `#` starts a comment only at the start of a line or after whitespace (so `$#`
+// and `${x#y}` survive).
+// Review B1: the comment strip is NOT quote-aware, so it can cut a whole command
+// (`echo " #" && npm ci`). Commands are therefore split from the RAW line, whether one IS
+// an npm command is judged on the raw piece, and only the search for the flag uses the
+// stripped piece. A piece that is nothing but a comment is skipped.
 const stripComment = (ln) => ln.replace(/(^|\s)#.*$/, '$1');
 // Split on ; && || | and a lone & (a newline already ended the line).
-export const commands = (run) => run.split('\n').flatMap((ln) => stripComment(ln).split(/&&|\|\||[;&|]/)).map((c) => c.trim()).filter(Boolean);
+export const commands = (run) => run.split('\n').flatMap((ln) => ln.split(/&&|\|\||[;&|]/))
+  .map((c) => ({ raw: c.trim(), flagText: stripComment(c).trim() })).filter((c) => c.flagText !== '');
 
 // The npm binary as a command word, whether bare, quoted or path-prefixed (`"npm"`,
 // `/usr/bin/npm`, `./node_modules/.bin/npm`): OMARK-106 LOW-2. `npx` is always a risk.
-const NPM_TOKEN = /(?:^|[\s(`])["']?(?:[^\s"'()`]*\/)?(npx|npm)["']?(?=\s|$)/;
+// Review B2: a word ends at whitespace OR ) > < or a backtick, so `(cd sub && npm ci)`,
+// `$(npm ci)`, a backticked npm ci, `npm ci>/dev/null` and `$(which npm) ci` are seen.
+const NPM_TOKEN = /(?:^|[\s(`])["']?(?:[^\s"'()`]*\/)?(npx|npm)["']?(?=[\s)<>`]|$)/;
 // The npm subcommands that can run a dependency's lifecycle script, including their
 // aliases and the abbreviations npm accepts (install: i in ins inst insta instal isnt;
 // clean-install: ci ic isntall-clean sit; install-test: it; install-ci-test: cit;
@@ -84,12 +90,20 @@ const NPM_TOKEN = /(?:^|[\s(`])["']?(?:[^\s"'()`]*\/)?(npx|npm)["']?(?=\s|$)/;
 // rebuild: rb), plus `audit fix`. NOT listed on purpose, and recorded on OMARK-106:
 // run / test / start (they run the ROOT package's own scripts, not a dependency's) and
 // pack / publish / version (they run the root package's lifecycle only).
-const NPM_SUB = /(?:^|\s)["']?(?:i|in|ins|inst|insta|instal|install|isntall|add|ci|clean-install|ic|install-clean|isntall-clean|sit|install-test|it|cit|install-ci-test|update|up|upgrade|udpate|dedupe|ddp|find-dupes|link|ln|init|innit|create|exec|x|rebuild|rb)["']?(?=\s|$)|(?:^|\s)audit\s+fix\b/;
+const NPM_SUB = /(?:^|\s)["']?(?:i|in|ins|inst|insta|instal|install|isntall|add|ci|clean-install|ic|install-clean|isntall-clean|sit|install-test|it|cit|install-ci-test|update|up|upgrade|udpate|dedupe|ddp|find-dupes|link|ln|init|innit|create|exec|x|rebuild|rb)["']?(?=[\s)<>`]|$)|(?:^|\s)audit\s+fix\b/;
+// A command whose FIRST non-flag word is one of these runs only the root package's own
+// scripts (nit 4): `npm run ci` is a script named ci, not `npm ci`. Anything else is
+// scanned for a risky subcommand anywhere after npm, so `npm --prefix x run ci` (a flag
+// value ahead of the subcommand) still over-reports rather than hides.
+const NPM_SAFE_FIRST = new Set(['run', 'run-script', 'rum', 'urn', 'test', 'tst', 't', 'start', 'stop', 'restart', 'pack', 'publish', 'version', 'view', 'config', 'help', 'ls', 'list', 'root', 'prefix', 'bin']);
 export const npmRisk = (cmd) => {
   const m = cmd.match(NPM_TOKEN);
   if (!m) return false;
   if (m[1] === 'npx') return true;
-  return NPM_SUB.test(cmd.slice(m.index + m[0].length));
+  const rest = cmd.slice(m.index + m[0].length);
+  const first = rest.split(/[\s)<>`]+/).map((t) => t.replace(/^["']|["']$/g, '')).find((t) => t && !t.startsWith('-'));
+  if (NPM_SAFE_FIRST.has(first)) return false;
+  return NPM_SUB.test(rest);
 };
 
 // --ignore-scripts must be present AND not switched back off: `--ignore-scripts=false`
@@ -106,7 +120,8 @@ const hasIgnoreScripts = (cmd) => {
   const occ = [...cmd.matchAll(re)];
   if (occ.length === 0) return false;
   return occ.every((m) => {
-    const tok = m[0].replace(/^["']|["']$/g, '');
+    // a closing ) or backtick ends the word (`(cd sub && npm ci --ignore-scripts)`)
+    const tok = m[0].replace(/[)`]+$/, '').replace(/^["']|["']$/g, '');
     if (tok === '--ignore-scripts=true') return true;
     if (tok !== '--ignore-scripts') return false;
     return !/^\s+["']?(true|false|null|undefined|[0-9]+)["']?(?=\s|$)/i.test(cmd.slice(m.index + m[0].length));
@@ -146,9 +161,9 @@ export function violations(file, text) {
     }
     // Item 1: any npm install/ci/exec or npx, global or not, must not run dependency
     // lifecycle scripts.
-    for (const cmd of commands(run)) {
-      if (npmRisk(cmd) && !hasIgnoreScripts(cmd)) {
-        v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${cmd}`);
+    for (const { raw, flagText } of commands(run)) {
+      if (npmRisk(raw) && !hasIgnoreScripts(flagText)) {
+        v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${raw}`);
       }
     }
     // Item 3: the Quest version is read by the one bounded script and by nothing
@@ -178,7 +193,7 @@ for (const f of files) {
     const rt = joinContinuations(runText(s));
     if (/uses:\s*actions\/checkout@/.test(s.lines.join('\n'))) checkouts++;
     if (rt) runBlocks++;
-    if (commands(rt).some(npmRisk)) installs++;
+    if (commands(rt).some((c) => npmRisk(c.raw))) installs++;
     if (rt.includes('scripts/ci/read-quest-version.sh')) readers++;
   }
   const v = violations(f, text);
@@ -246,6 +261,15 @@ const bad = {
   'R2-3: a bare --ignore-scripts then the word false': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts false "x"\n')],
   'R2-4: a bare flag, then empty quotes stuck to a false one': ['without --ignore-scripts', wrap("      - name: i\n        run: npm install -g --ignore-scripts ''--ignore-scripts=false x\n")],
   'R2-4: a bare flag, then a backslash stuck to a false one': ['without --ignore-scripts', wrap('      - name: i\n        run: npm install -g --ignore-scripts \\--ignore-scripts=false x\n')],
+  // Review B1 / B2: each form must fail, and each was confirmed to pass unflagged on 8bf321d.
+  'B1: a quoted space-hash hiding npm ci after &&': ['without --ignore-scripts', wrap('      - name: i\n        run: echo " #" && npm ci\n')],
+  'B1: a quoted space-hash in an env assignment before npm ci': ['without --ignore-scripts', wrap('      - name: i\n        run: FOO=" #" npm ci\n')],
+  'B1: a quoted space-hash then npm install after ;': ['without --ignore-scripts', wrap('      - name: i\n        run: echo "step #1"; npm install x\n')],
+  'B2: npm ci inside a subshell': ['without --ignore-scripts', wrap('      - name: i\n        run: (cd sub && npm ci)\n')],
+  'B2: npm ci inside $( )': ['without --ignore-scripts', wrap('      - name: i\n        run: x=$(npm ci)\n')],
+  'B2: a backticked npm ci': ['without --ignore-scripts', wrap('      - name: i\n        run: x=`npm ci`\n')],
+  'B2: npm ci with a redirect stuck on': ['without --ignore-scripts', wrap('      - name: i\n        run: npm ci>/dev/null\n')],
+  'B2: $(which npm) ci': ['without --ignore-scripts', wrap('      - name: i\n        run: $(which npm) ci\n')],
   'Quest version read by sed': ['names the', wrap("      - name: q\n        run: |\n          v=\"$(sed -n 's/.*Quest CLI \\([0-9.]*\\).*/\\1/p' CLAUDE.md)\"\n")],
   'Quest version read by grep (not sed)': ['reads CLAUDE.md without', wrap("      - name: q\n        run: v=\"$(grep -o '[0-9][0-9.]*' CLAUDE.md | head -1)\"\n")],
   'Quest version read by awk naming the phrase': ['names the', wrap("      - name: q\n        run: awk '/Quest CLI/ {print $4}' x\n")],
@@ -272,6 +296,12 @@ for (const [label, run] of [
   ['the flag followed by a trailing comment', 'npm ci --ignore-scripts # why'],
   ['the flag on every command of a && chain', 'npm ci --ignore-scripts && npm rebuild --ignore-scripts'],
   ['npm audit with no fix', 'npm audit'],
+  // nit 4: scripts of the root package are not dependency lifecycle scripts. `npm run ci`
+  // is a script NAMED ci and is accepted; the decline is pinned by these cases.
+  ['npm run build', 'npm run build'],
+  ['npm run ci (a script named ci, not npm ci)', 'npm run ci'],
+  ['npm test', 'npm test'],
+  ['a subshell npm ci with the flag', '(cd sub && npm ci --ignore-scripts)'],
   ['npm update with the flag', 'npm update --ignore-scripts'],
   ['a path-prefixed npm with the flag', '/usr/bin/npm ci --ignore-scripts'],
   ['a quoted run value', '"npm ci --ignore-scripts"'],
@@ -297,5 +327,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 76) { console.log('ran fewer than the 76 expected passing cases'); process.exit(1); }
+if (pass < 88) { console.log('ran fewer than the 88 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
