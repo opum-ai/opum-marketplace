@@ -47,9 +47,10 @@ NPMFLAGS=(--offline --no-audit --no-fund -g --prefix "$S/prefix")
 installed() { [ -d "$S/prefix/lib/node_modules/top" ] && [ -d "$S/prefix/lib/node_modules/top/node_modules/bad-dep" -o -d "$S/prefix/lib/node_modules/bad-dep" ]; }
 
 # Arm 1: the flag CI now passes. Must succeed, and the script must NOT have run.
-# OMARK-109 review: the CI job now sets npm_config_ignore_scripts=true, which alone would make
-# this arm pass whether or not the flag does anything. The variable is set to false here (scoped
-# to this one npm; the CLI flag outranks the environment) so the arm proves the FLAG on its own.
+# OMARK-109 review, updated by OMARK-111: the CI workflow sets npm_config_ignore_scripts=true at
+# workflow level, so every step inherits it, and that alone would make this arm pass whether or
+# not the flag does anything. The variable is set to false here (scoped to this one npm; the CLI
+# flag outranks the environment) so the arm exercises the FLAG without the variable's help.
 reset_prefix
 env npm_config_ignore_scripts=false npm install "${NPMFLAGS[@]}" --ignore-scripts "$S/top/top-1.0.0.tgz" >"$S/arm1.log" 2>&1; rc=$?
 [ "$rc" -eq 0 ] && ok 'with -g --ignore-scripts the install exits 0 despite a failing transitive postinstall' || no "with -g --ignore-scripts: expected exit 0, got $rc" "$(cat "$S/arm1.log")"
@@ -57,9 +58,9 @@ env npm_config_ignore_scripts=false npm install "${NPMFLAGS[@]}" --ignore-script
 installed && ok 'with --ignore-scripts both packages were still installed (liveness)' || no 'with --ignore-scripts the packages are missing' "$(cat "$S/arm1.log")"
 
 # Arm 2: the control. Without the flag the script must run and fail the install.
-# OMARK-109: the CI job now sets npm_config_ignore_scripts=true for every step, so the control
-# sets it to false itself (env, scoped to this one npm); otherwise the control would run under
-# the job's variable and the script would never run.
+# OMARK-109, updated by OMARK-111: the CI workflow sets npm_config_ignore_scripts=true for every
+# step, so the control sets it to false itself (env, scoped to this one npm); otherwise the
+# control would run under the workflow's variable and the script would never run.
 reset_prefix
 env npm_config_ignore_scripts=false npm install "${NPMFLAGS[@]}" "$S/top/top-1.0.0.tgz" >"$S/arm2.log" 2>&1; rc2=$?
 mode='default global install'

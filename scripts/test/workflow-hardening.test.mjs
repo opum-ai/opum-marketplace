@@ -98,7 +98,15 @@ const NPM_CMD = /(^|[\s;&|(])(npm\b[^;&|\n]*?\s(install|i|add|ci|exec|x|rebuild|
 // flag (`''--ignore-scripts=false`, `\\--ignore-scripts=false`) is not the bare flag and is
 // refused; and a bare flag followed by a boolean-looking word (`--ignore-scripts false`) is
 // refused too, because npm's option parser reads that next word as the flag's value.
-const flagOccurrences = (cmd) => [...cmd.matchAll(/\S*--(?:no-)?ignore-scripts\S*/g)];
+// OMARK-111 B1: npm's parser (nopt) strips ALL leading dashes, toggles on every case-insensitive
+// `no-`, and expands abbreviations, so `--NO-ignore-scripts`, `--no-no-no-ignore-scripts` and
+// `--ignore-script=false` all reach the same option. An occurrence is therefore any
+// whitespace-delimited token that is option-like (junk, then a dash) and names ignore[-_]?script,
+// case-insensitively, or that carries `--` right before such a name; only the exact bare flag and
+// `--ignore-scripts=true` are allowed. NOT closable by a line scanner: a pure abbreviation that
+// never spells the name (`--ignore=false`), or one built by the shell at run time.
+const flagOccurrences = (cmd) => [...cmd.matchAll(/\S+/g)].filter((m) =>
+  /ignore[-_]?script/i.test(m[0]) && (/^[^\w\s-]*-/.test(m[0]) || /--(?:no-)*ignore[-_]?script/i.test(m[0])));
 // OMARK-111 item 3: used on EVERY run line, not only npm lines, so an override flag on a
 // subcommand NPM_CMD does not list (`npm update --no-ignore-scripts`) is still seen.
 const hasBadIgnoreFlag = (cmd) => flagOccurrences(cmd).length > 0 && !hasIgnoreScripts(cmd);
@@ -136,7 +144,10 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // it, and every accepted opt-out is listed in the suite's output (workflowOptOuts).
 // The command-recognition rule above stays as a backstop. A command-line flag (--no-ignore-scripts,
 // --ignore-scripts=false) outranks the environment: that backstop catches it only for the
-// subcommands NPM_CMD lists, plus the whole-run-text scan for any override flag or variable below.
+// subcommands NPM_CMD lists. Two further scans cover the rest: every run: line is scanned for an
+// override flag (flagOccurrences, any subcommand), and every non-comment line outside the top-level
+// env block is scanned for the variable's name (variableTouches). Neither can close an abbreviation
+// that never spells the name (`--ignore=false`) or one the shell assembles at run time.
 const IGNORE_ENV = /^\s*["']?npm_config_ignore[-_]scripts["']?\s*:\s*(.*?)\s*(?:#.*)?$/i;
 const isTrue = (v) => /^(["']?)true\1$/.test(v);
 const OPT_OUT_MARK = /#\s*ignore-scripts-opt-out:\s*\S/;
@@ -199,6 +210,25 @@ export function workflowOverrides(text) {
 }
 export const workflowOptOuts = (file, text) => workflowOverrides(text).filter((o) => o.reason).map((o) => `${file}:${o.line}: job ${o.job}: ${o.reason}`);
 
+// OMARK-111 B3: every non-comment line outside the top-level env block, wherever the variable
+// is named: a run: body, `shell:`, `defaults.run.shell` (`env -u ...`), a github-script
+// `core.exportVariable(...)`, a matrix list item. The one allowed spelling is a plain
+// `npm_config_ignore_scripts=true` token; a `key: value` env entry at the start of a line is
+// the opt-out rule's business (workflowOverrides), so it is skipped here.
+export function variableTouches(text) {
+  const lines = text.split('\n');
+  const top = topEnv(lines);
+  const out = [];
+  lines.forEach((ln, k) => {
+    if (top && k >= top.at && k < top.end) return;
+    if (/^\s*#/.test(ln) || IGNORE_ENV.test(ln)) return;
+    for (const m of ln.matchAll(/\S*npm_config_ignore[-_]scripts\S*/gi)) {
+      if (!/^npm_config_ignore_scripts=["']?true["']?$/.test(m[0])) out.push({ line: k + 1, tok: m[0] });
+    }
+  });
+  return out;
+}
+
 export function workflowEnvViolations(file, text) {
   const v = [];
   const lines = text.split('\n');
@@ -212,9 +242,15 @@ export function workflowEnvViolations(file, text) {
   for (const o of workflowOverrides(text)) {
     if (!o.reason) v.push(`${file}:${o.line}: job ${o.job} overrides npm_config_ignore_scripts to ${o.value || 'an empty value'} without an '# ignore-scripts-opt-out: <reason>' comment on the line directly above`);
   }
-  if (jobBlocks(text).length === 0) v.push(`${file}: no jobs were read (a jobs: key with a comment or a non-2-space job indent is not understood), so no job could be checked`);
+  for (const t of variableTouches(text)) {
+    v.push(`${file}:${t.line}: a line touches npm_config_ignore_scripts (${t.tok}); only a plain =true assignment is allowed (job and step env: entries are judged by the opt-out rule instead)`);
+  }
+  if (jobBlocks(text).length === 0) v.push(`${file}: no jobs were read (a jobs: key that is not at column 0, or a job indent other than 2 spaces, is not understood), so no job could be checked`);
   lines.forEach((l, i) => {
-    if (/^\s*env:\s*\{/.test(l)) v.push(`${file}:${i + 1}: flow-style env is not read by this checker; write block style`);
+    if (/^\s*["']?env["']?:\s*\{/.test(l)) v.push(`${file}:${i + 1}: flow-style env is not read by this checker; write block style`);
+    // OMARK-111 B2: an expression-valued env (`env: ${{ matrix.e }}`, `env: ${{ fromJSON(...) }}`)
+    // takes its keys from data this reader cannot see.
+    if (!/^\s*#/.test(l) && /^\s*["']?env["']?:\s*\$\{\{/.test(l)) v.push(`${file}:${i + 1}: expression-valued env (env: \${{ ... }}) is not read by this checker; write the keys out`);
     // An anchor or alias could re-point an env value past the line reader (OMARK-111 item 9).
     if (!/^\s*#/.test(l) && (/^\s*<<:/.test(l) || /:\s+[&*][\w-]+\s*(#.*)?$/.test(l) || /^\s*-\s+[&*][\w-]+\s*(#.*)?$/.test(l))) {
       v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x, <<:) is not read by this checker; write the value out`);
@@ -258,11 +294,6 @@ export function violations(file, text) {
     // to $GITHUB_ENV), turns scripts back on past the workflow-level setting.
     for (const ln of run.split('\n')) {
       if (hasBadIgnoreFlag(ln)) v.push(`${file}:${s.line}: ignore-scripts override flag in a run: line: ${ln.trim()}`);
-      for (const m of ln.matchAll(/\S*npm_config_ignore[-_]scripts\S*/gi)) {
-        if (!/^npm_config_ignore_scripts=["']?true["']?$/.test(m[0])) {
-          v.push(`${file}:${s.line}: a run: line touches npm_config_ignore_scripts (${m[0]}); only a plain =true assignment is allowed`);
-        }
-      }
     }
     // Item 3: the Quest version is read by the one bounded script and by nothing
     // else. Any run that names the declaring phrase, or reads CLAUDE.md without
@@ -315,8 +346,8 @@ runBlocks >= 10 ? ok(`read ${runBlocks} run: bodies`) : no(`read only ${runBlock
 // --- each rule rejects its own bad fixture --------------------------------
 const CHECK = '      - name: c\n        run: bash scripts/ci/assert-no-persisted-credential.sh\n';
 const CO = '      - uses: actions/checkout@v4\n        with:\n          persist-credentials: false\n';
-// OMARK-109: every fixture job carries the job-level variable, so the older cases keep
-// testing the rule they were written for and not the job rule.
+// OMARK-111: every fixture carries the workflow-level variable, so the older cases keep
+// testing the rule they were written for and not the workflow-env rule.
 const wrap = (steps) => `env:\n  npm_config_ignore_scripts: "true"\njobs:\n  a:\n    steps:\n${steps}`;
 const bad = {
   'checkout without persist-credentials: false': ['persist-credentials', wrap('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n' + CHECK)],
@@ -416,12 +447,33 @@ const wbad = {
   'the hyphen spelling set to "0"': ['without an', wf(WENV, JOB('', ENVSTEP('"0"').replace('npm_config_ignore_scripts', 'npm_config_ignore-scripts')))],
   'an empty override value': ['without an', wf(WENV, JOB('', ENVSTEP('')))],
   'a flow-style env mapping': ['flow-style env', wf(WENV, JOB('    env: { npm_config_ignore_scripts: "false" }\n', NPMSTEP))],
-  'an override in a quoted-key job (item 6)': ['without an', wf(WENV, JOB('', NPMSTEP) + '  "b":\n    runs-on: x\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
-  'an override in a job whose key has a trailing comment (item 6)': ['without an', wf(WENV, JOB('', NPMSTEP) + '  b: # note\n    runs-on: x\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
-  'an override after a column-0 comment inside a job (item 7)': ['without an', wf(WENV, JOB('', NPMSTEP) + '# column-zero comment\n' + JOB('    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP, 'b'))],
+  'an override in a quoted-key job (item 6)': ['job b overrides', wf(WENV, JOB('', NPMSTEP) + '  "b":\n    runs-on: x\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
+  'an override in a job whose key has a trailing comment (item 6)': ['job b overrides', wf(WENV, JOB('', NPMSTEP) + '  b: # note\n    runs-on: x\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
+  // The column-0 comment sits INSIDE job b, above its env:, so the old reader ended b there and
+  // attributed the override to no job. Items 6 and 7 change attribution only (the override line is
+  // caught by the whole-file scan either way), so the needle names the job.
+  'an override after a column-0 comment inside job b (item 7)': ['job b overrides', wf(WENV, JOB('', NPMSTEP) + '  b:\n    runs-on: x\n# column-zero comment\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
+  'an override under a top-level key after jobs: is not a job (item 8)': ['job (outside any job) overrides', wf(WENV, JOB('', NPMSTEP)) + 'on:\n  push:\n    env:\n      npm_config_ignore_scripts: "false"\n'],
   'jobs: with a trailing comment and 4-space jobs read as no jobs (item 8)': ['no jobs were read', WENV + 'jobs: # x\n    a:\n      steps:\n        - run: echo\n'],
   'a YAML alias used as an env value (item 9)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        env: *off\n        run: echo\n'))],
   'a YAML merge key (item 9)': ['anchor or alias', wf(WENV, JOB('    env:\n      <<: *off\n', NPMSTEP))],
+  // OMARK-111 B1: the forms nopt reads as the same option
+  'npm update --NO-ignore-scripts (case)': ['override flag', wf(WENV, JOB('', '      - run: npm update --NO-ignore-scripts\n'))],
+  'npm update --No-ignore-scripts (mixed case)': ['override flag', wf(WENV, JOB('', '      - run: npm update --No-ignore-scripts\n'))],
+  'npm update --no-no-no-ignore-scripts (repeated no-)': ['override flag', wf(WENV, JOB('', '      - run: npm update --no-no-no-ignore-scripts\n'))],
+  'npm link --ignore-script=false (abbreviated name)': ['override flag', wf(WENV, JOB('', '      - run: npm link --ignore-script=false\n'))],
+  'npm update -no-ignore-scripts (one dash)': ['override flag', wf(WENV, JOB('', '      - run: npm update -no-ignore-scripts\n'))],
+  'npm update ---no-ignore-scripts (three dashes)': ['override flag', wf(WENV, JOB('', '      - run: npm update ---no-ignore-scripts\n'))],
+  'npm update --ignore_scripts=false (underscore)': ['override flag', wf(WENV, JOB('', '      - run: npm update --ignore_scripts=false\n'))],
+  'npm install --ignore-scripts then --NO-ignore-scripts (the backstop hole: last flag wins)': ['without --ignore-scripts', wf(WENV, JOB('', '      - run: npm install --ignore-scripts --NO-ignore-scripts x\n'))],
+  // OMARK-111 B2: an expression-valued env
+  'env: ${{ matrix.e }} with a matrix item switching the variable off': ['expression-valued env', wf(WENV, JOB('    strategy:\n      matrix:\n        e:\n          - npm_config_ignore_scripts: "false"\n    env: ${{ matrix.e }}\n', NPMSTEP))],
+  'env: ${{ fromJSON(...) }} at step level': ['expression-valued env', wf(WENV, JOB('', '      - name: i\n        env: ${{ fromJSON(\'{"npm_config_ignore_scripts":"false"}\') }}\n        run: echo\n'))],
+  // OMARK-111 B3: the variable named outside any run: body
+  'defaults.run.shell: env -u npm_config_ignore_scripts bash': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', NPMSTEP)).replace('jobs:\n', 'defaults:\n  run:\n    shell: env -u npm_config_ignore_scripts bash -e {0}\njobs:\n')],
+  'a step shell: env -u npm_config_ignore_scripts bash': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - shell: env -u npm_config_ignore_scripts bash -e {0}\n        run: npm update\n'))],
+  'github-script core.exportVariable of the variable': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', "      - uses: actions/github-script@v7\n        with:\n          script: core.exportVariable('npm_config_ignore_scripts','false')\n"))],
+  'a matrix list item carrying the variable (no env: key above it)': ['touches npm_config_ignore_scripts', wf(WENV, JOB('    strategy:\n      matrix:\n        include:\n          - npm_config_ignore_scripts: "false"\n', NPMSTEP))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -446,6 +498,10 @@ for (const [label, t] of [
   ['an override with the adjacent opt-out comment', wf(WENV, JOB('', ENVSTEP('false', '          ' + OPTC)))],
   ['a plain =true assignment in a run line', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=true npm ci --ignore-scripts\n'))],
   ['a quoted job key with no override', wf(WENV, JOB('', NPMSTEP, '"quoted"'))],
+  ['a block-style env whose value is an expression (only the env: line itself is refused)', wf(WENV, JOB('', '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: echo "$V"\n'))],
+  ['a top-level key after jobs: that is not a job, with no override', wf(WENV, JOB('', NPMSTEP)) + 'on:\n  push:\n    branches:\n      - main\n'],
+  ['--ignore-scripts then --ignore-scripts=true on a subcommand NPM_CMD does not list', wf(WENV, JOB('', '      - run: npm update --ignore-scripts --ignore-scripts=true\n'))],
+  ['a script path that merely contains ignore-scripts', wf(WENV, JOB('', '      - run: bash scripts/test/install-ignore-scripts.test.sh\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -507,5 +563,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 133) { console.log('ran fewer than the 133 expected passing cases'); process.exit(1); }
+if (pass < 152) { console.log('ran fewer than the 152 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
