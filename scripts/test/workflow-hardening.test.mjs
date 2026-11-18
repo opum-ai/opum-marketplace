@@ -98,9 +98,12 @@ const NPM_CMD = /(^|[\s;&|(])(npm\b[^;&|\n]*?\s(install|i|add|ci|exec|x|rebuild|
 // flag (`''--ignore-scripts=false`, `\\--ignore-scripts=false`) is not the bare flag and is
 // refused; and a bare flag followed by a boolean-looking word (`--ignore-scripts false`) is
 // refused too, because npm's option parser reads that next word as the flag's value.
+const flagOccurrences = (cmd) => [...cmd.matchAll(/\S*--(?:no-)?ignore-scripts\S*/g)];
+// OMARK-111 item 3: used on EVERY run line, not only npm lines, so an override flag on a
+// subcommand NPM_CMD does not list (`npm update --no-ignore-scripts`) is still seen.
+const hasBadIgnoreFlag = (cmd) => flagOccurrences(cmd).length > 0 && !hasIgnoreScripts(cmd);
 const hasIgnoreScripts = (cmd) => {
-  const re = /\S*--(?:no-)?ignore-scripts\S*/g;
-  const occ = [...cmd.matchAll(re)];
+  const occ = flagOccurrences(cmd);
   if (occ.length === 0) return false;
   return occ.every((m) => {
     const t = m[0];
@@ -120,77 +123,109 @@ const flowStyle = (text) => text.split('\n').map((l, i) => [l, i + 1])
 // Workflow files are *.yml AND *.yaml (OMARK-106 LOW-4: the .yml-only filter skipped .yaml).
 export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 
-// OMARK-109 (DEC-240 AC 3, opum-doc ruling A). The lint above is a line scanner and every
-// review round found another evasion of it, so the control is the environment: every job that
-// runs npm sets `npm_config_ignore_scripts: "true"` at JOB level, and npm then skips dependency
-// lifecycle scripts whatever the command line spells. This lint is the backstop, and this rule
-// is what keeps the control from being dropped or switched off.
-//
-// A job is covered when it runs an npm command (the rule above) or installs a Node toolchain
-// (actions/setup-node), since that is a job that goes on to run npm.
-// OPT-OUTS: setting the variable to anything but true anywhere (job or step env) is an
-// opt-out. It is allowed only if file:job is listed here AND the line directly above it carries
-// `opt-out reason:`. The list is pinned EMPTY: no job needs a dependency lifecycle script, and
-// adding one is an edit to this suite, which is the review point.
-const OPT_OUTS = [];
+// OMARK-111 (DEC-277 (a1), opum-doc, supersedes OMARK-109's job-level rule). The lint above is a
+// line scanner and every review round found another evasion of it, so the control is the
+// environment, set ONCE per workflow: `npm_config_ignore_scripts: "true"` in the WORKFLOW-level
+// `env:`. Every job and step inherits it, so the protection does not depend on recognising npm
+// at all (a new job running `npm update`, `/usr/bin/npm link` or a script that calls npm is
+// covered). Two checks keep it from being dropped or switched off:
+//   (a) every workflow file has the top-level env entry, exactly "true";
+//   (b) no job-level or step-level env sets it to anything else.
+// The one exception is an explicit opt-out for a job that genuinely needs lifecycle scripts: an
+// override is accepted only with `# ignore-scripts-opt-out: <reason>` on the line directly above
+// it, and every accepted opt-out is listed in the suite's output (workflowOptOuts).
+// The command-recognition rule above stays as a backstop. A command-line flag (--no-ignore-scripts,
+// --ignore-scripts=false) outranks the environment: that backstop catches it only for the
+// subcommands NPM_CMD lists, plus the whole-run-text scan for any override flag or variable below.
 const IGNORE_ENV = /^\s*["']?npm_config_ignore[-_]scripts["']?\s*:\s*(.*?)\s*(?:#.*)?$/i;
 const isTrue = (v) => /^(["']?)true\1$/.test(v);
+const OPT_OUT_MARK = /#\s*ignore-scripts-opt-out:\s*\S/;
 
-// Jobs: each `  name:` key at indent 2 under `jobs:`, up to the next one.
+// Jobs: each `  name:` key (optionally quoted, optionally with a trailing comment) under
+// `jobs:`, up to the next job key or the next top-level key. A column-0 comment does not end a
+// job (OMARK-111 items 6-8).
 function jobBlocks(text) {
   const lines = text.split('\n');
-  const at = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+  const at = lines.findIndex((l) => /^jobs:\s*(#.*)?$/.test(l));
   if (at < 0) return [];
+  const isJob = (l) => /^  ["']?[\w-]+["']?:\s*(#.*)?$/.test(l);
   const out = [];
   for (let i = at + 1; i < lines.length; i++) {
-    const m = lines[i].match(/^  ([\w-]+):\s*$/);
-    if (!m) continue;
+    if (/^\S/.test(lines[i]) && !lines[i].startsWith('#')) break;
+    if (!isJob(lines[i])) continue;
     let j = i + 1;
-    while (j < lines.length && !/^  [\w-]+:\s*$/.test(lines[j]) && !/^\S/.test(lines[j])) j++;
-    out.push({ name: m[1], line: i + 1, lines: lines.slice(i, j) });
+    while (j < lines.length && !isJob(lines[j]) && (!/^\S/.test(lines[j]) || lines[j].startsWith('#'))) j++;
+    out.push({ name: lines[i].match(/^  ["']?([\w-]+)/)[1], line: i + 1, lines: lines.slice(i, j) });
   }
   return out;
 }
 
-export function jobEnvViolations(file, text, optOuts = OPT_OUTS) {
-  const v = [];
-  for (const job of jobBlocks(text)) {
-    const body = job.lines.join('\n');
-    const runsNpm = steps(body).some((st) => NPM_CMD.test(joinContinuations(runText(st)))) || /uses:\s*actions\/setup-node@/.test(body);
-    // Job-level env: a `    env:` at indent 4, then the indented lines under it.
-    let jobTrue = false;
-    for (let k = 0; k < job.lines.length; k++) {
-      if (/^    env:\s*(#.*)?$/.test(job.lines[k])) {
-        for (let q = k + 1; q < job.lines.length && (job.lines[q].trim() === '' || indentOf(job.lines[q]) > 4); q++) {
-          const m = job.lines[q].match(IGNORE_ENV);
-          if (m && isTrue(m[1])) jobTrue = true;
-        }
-      }
-    }
-    // Any setting that is not true, at any depth in the job, is an opt-out.
-    job.lines.forEach((ln, k) => {
-      const m = ln.match(IGNORE_ENV);
-      if (!m || isTrue(m[1])) return;
-      const where = `${file}:${job.line + k}`;
-      if (!optOuts.includes(`${file}:${job.name}`)) {
-        v.push(`${where}: npm_config_ignore_scripts is set to ${m[1] || 'an empty value'}, an opt-out, in job ${job.name} which is not in the pinned opt-out list`);
-      } else if (!/opt-out reason:/.test(job.lines[k - 1] ?? '')) {
-        v.push(`${where}: the opt-out in job ${job.name} has no 'opt-out reason:' comment on the line above`);
-      }
-    });
-    const opted = optOuts.includes(`${file}:${job.name}`);
-    if (runsNpm && !jobTrue && !opted) {
-      v.push(`${file}:${job.line}: job ${job.name} runs npm but does not set job-level npm_config_ignore_scripts: "true"`);
-    }
+// The top-level `env:` block: its entry lines, read at the block's own child indent so a
+// block-scalar value that merely CONTAINS the text does not count (OMARK-111 item 10).
+function topEnv(lines) {
+  const at = lines.findIndex((l) => /^env:\s*(#.*)?$/.test(l));
+  if (at < 0) return null;
+  let child = null, end = at + 1;
+  for (; end < lines.length; end++) {
+    const l = lines[end];
+    if (l.trim() === '' || l.trim().startsWith('#')) continue;
+    if (indentOf(l) === 0) break;
+    if (child === null) child = indentOf(l);
   }
-  // A flow-style env mapping hides the key from the line reader above.
-  text.split('\n').forEach((l, i) => { if (/^\s*env:\s*\{/.test(l)) v.push(`${file}:${i + 1}: flow-style env is not read by this checker; write block style`); });
+  const entries = [];
+  for (let k = at + 1; k < end; k++) {
+    if (child !== null && indentOf(lines[k]) === child) { const m = lines[k].match(IGNORE_ENV); if (m) entries.push({ line: k + 1, value: m[1] }); }
+  }
+  return { at, end, entries };
+}
+
+// Every override of the variable below the workflow level: a value other than true, in any job
+// or step env. Returns [{ line, job, value, reason }]; reason is null when the opt-out comment
+// is absent.
+export function workflowOverrides(text) {
+  const lines = text.split('\n');
+  const top = topEnv(lines);
+  const jobs = jobBlocks(text);
+  const out = [];
+  lines.forEach((ln, k) => {
+    if (top && k >= top.at && k < top.end) return;
+    const m = ln.match(IGNORE_ENV);
+    if (!m || isTrue(m[1])) return;
+    const job = jobs.find((j) => k + 1 >= j.line && k + 1 < j.line + j.lines.length);
+    const above = lines[k - 1] ?? '';
+    out.push({ line: k + 1, job: job ? job.name : '(outside any job)', value: m[1], reason: OPT_OUT_MARK.test(above) ? above.trim() : null });
+  });
+  return out;
+}
+export const workflowOptOuts = (file, text) => workflowOverrides(text).filter((o) => o.reason).map((o) => `${file}:${o.line}: job ${o.job}: ${o.reason}`);
+
+export function workflowEnvViolations(file, text) {
+  const v = [];
+  const lines = text.split('\n');
+  const top = topEnv(lines);
+  if (!top || !top.entries.some((e) => isTrue(e.value))) {
+    v.push(`${file}: no workflow-level env: npm_config_ignore_scripts: "true" (DEC-277 a1: every workflow sets it once, at the top level)`);
+  }
+  for (const e of top ? top.entries : []) {
+    if (!isTrue(e.value)) v.push(`${file}:${e.line}: the workflow-level npm_config_ignore_scripts is ${e.value || 'empty'}, not exactly "true"`);
+  }
+  for (const o of workflowOverrides(text)) {
+    if (!o.reason) v.push(`${file}:${o.line}: job ${o.job} overrides npm_config_ignore_scripts to ${o.value || 'an empty value'} without an '# ignore-scripts-opt-out: <reason>' comment on the line directly above`);
+  }
+  if (jobBlocks(text).length === 0) v.push(`${file}: no jobs were read (a jobs: key with a comment or a non-2-space job indent is not understood), so no job could be checked`);
+  lines.forEach((l, i) => {
+    if (/^\s*env:\s*\{/.test(l)) v.push(`${file}:${i + 1}: flow-style env is not read by this checker; write block style`);
+    // An anchor or alias could re-point an env value past the line reader (OMARK-111 item 9).
+    if (!/^\s*#/.test(l) && (/^\s*<<:/.test(l) || /:\s+[&*][\w-]+\s*(#.*)?$/.test(l) || /^\s*-\s+[&*][\w-]+\s*(#.*)?$/.test(l))) {
+      v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x, <<:) is not read by this checker; write the value out`);
+    }
+  });
   return v;
 }
 
 export function violations(file, text) {
   const v = [];
-  v.push(...jobEnvViolations(file, text));
+  v.push(...workflowEnvViolations(file, text));
   for (const [, n] of flowStyle(text)) v.push(`${file}:${n}: flow-style YAML (a { } step or steps: [ ]) is not read by this checker; write block style`);
   const all = steps(text);
   all.forEach((s, idx) => {
@@ -218,6 +253,17 @@ export function violations(file, text) {
         v.push(`${file}:${s.line}: npm/npx command without --ignore-scripts: ${ln.trim()}`);
       }
     }
+    // OMARK-111 item 3: the whole run text. Any override flag anywhere, and any touch of the
+    // variable that is not a plain =true assignment (inline env, export, unset, env -u, a write
+    // to $GITHUB_ENV), turns scripts back on past the workflow-level setting.
+    for (const ln of run.split('\n')) {
+      if (hasBadIgnoreFlag(ln)) v.push(`${file}:${s.line}: ignore-scripts override flag in a run: line: ${ln.trim()}`);
+      for (const m of ln.matchAll(/\S*npm_config_ignore[-_]scripts\S*/gi)) {
+        if (!/^npm_config_ignore_scripts=["']?true["']?$/.test(m[0])) {
+          v.push(`${file}:${s.line}: a run: line touches npm_config_ignore_scripts (${m[0]}); only a plain =true assignment is allowed`);
+        }
+      }
+    }
     // Item 3: the Quest version is read by the one bounded script and by nothing
     // else. Any run that names the declaring phrase, or reads CLAUDE.md without
     // going through that script, is a second reader (sed, grep, awk, perl, cut...).
@@ -237,7 +283,7 @@ const no = (m, d) => { fail++; console.log(`  FAIL ${m}`); if (d) console.log(` 
 
 // --- the real workflows are clean, and we really read them ----------------
 const files = readdirSync(wfDir).filter(isWorkflowFile).sort();
-let jobsRead = 0, coveredJobs = 0;
+let jobsRead = 0, topEnvs = 0, optOutsListed = 0;
 let stepCount = 0, checkouts = 0, installs = 0, runBlocks = 0, readers = 0;
 for (const f of files) {
   const text = readFileSync(path.join(wfDir, f), 'utf8');
@@ -250,14 +296,16 @@ for (const f of files) {
     if (rt.includes('scripts/ci/read-quest-version.sh')) readers++;
   }
   jobsRead += jobBlocks(text).length;
-  coveredJobs += jobBlocks(text).filter((j) => /actions\/setup-node@/.test(j.lines.join('\n'))).length;
+  if (topEnv(text.split('\n'))?.entries.some((e) => isTrue(e.value))) topEnvs++;
+  for (const line of workflowOptOuts(f, text)) { optOutsListed++; console.log(`  note opt-out: ${line}`); }
   const v = violations(f, text);
   v.length === 0 ? ok(`${f}: no hardening violations`) : v.forEach((x) => no(x));
 }
 // Positive control: a reader that found nothing would also report no violations.
 jobsRead >= 5 ? ok(`read ${jobsRead} jobs`) : no(`read only ${jobsRead} jobs`);
-// All three npm-running jobs in ci.yml are covered, so the job rule had something to judge.
-coveredJobs === 3 ? ok('found all 3 setup-node jobs, each held to the job-level variable') : no(`expected 3 setup-node jobs, found ${coveredJobs}`);
+// DEC-277 (a1): every workflow carries the top-level variable, and none opts out today.
+topEnvs === files.length ? ok(`all ${files.length} workflows set the workflow-level variable to "true"`) : no(`only ${topEnvs} of ${files.length} workflows set the workflow-level variable`);
+optOutsListed === 0 ? ok('no job opts out of the variable (listed above if any)') : no(`${optOutsListed} opt-out(s) listed above; confirm each is intended`);
 stepCount >= 25 ? ok(`read ${stepCount} steps across ${files.length} workflows`) : no(`read only ${stepCount} steps; the reader is not seeing the workflows`);
 checkouts === 4 ? ok('found all 4 actions/checkout steps') : no(`expected 4 checkout steps, found ${checkouts}`);
 installs === 2 ? ok('found both npm install steps') : no(`expected 2 npm install steps, found ${installs}`);
@@ -269,7 +317,7 @@ const CHECK = '      - name: c\n        run: bash scripts/ci/assert-no-persisted
 const CO = '      - uses: actions/checkout@v4\n        with:\n          persist-credentials: false\n';
 // OMARK-109: every fixture job carries the job-level variable, so the older cases keep
 // testing the rule they were written for and not the job rule.
-const wrap = (steps) => `jobs:\n  a:\n    env:\n      npm_config_ignore_scripts: "true"\n    steps:\n${steps}`;
+const wrap = (steps) => `env:\n  npm_config_ignore_scripts: "true"\njobs:\n  a:\n    steps:\n${steps}`;
 const bad = {
   'checkout without persist-credentials: false': ['persist-credentials', wrap('      - uses: actions/checkout@v4\n        with:\n          fetch-depth: 0\n' + CHECK)],
   'checkout not followed by the credential check': ['does not run scripts/ci/assert-no-persisted-credential.sh', wrap(CO + '      - name: x\n        run: echo hi\n')],
@@ -349,44 +397,67 @@ for (const [label, [needle, text]] of Object.entries(bad)) {
   const v = violations('fixture.yml', text);
   v.some((x) => x.includes(needle)) ? ok(`rejects: ${label}`) : no(`did NOT reject: ${label}`, JSON.stringify(v));
 }
-// --- OMARK-109: the job-level variable --------------------------------------
-const ENVT = '    env:\n      npm_config_ignore_scripts: "true"\n';
-const job = (name, extra, steps2) => `jobs:\n  ${name}:\n    runs-on: ubuntu-latest\n${extra}    steps:\n${steps2}`;
+// --- OMARK-111 / DEC-277 (a1): the workflow-level variable ---------------------
+const WENV = 'env:\n  npm_config_ignore_scripts: "true"\n';
+const JOB = (extra, steps2, name = 'a') => `  ${name}:\n    runs-on: ubuntu-latest\n${extra}    steps:\n${steps2}`;
+const wf = (top, jobs) => `${top}jobs:\n${jobs}`;
 const NPMSTEP = '      - name: i\n        run: npm install -g --ignore-scripts x\n';
-const jv = (file, t, o) => jobEnvViolations(file, t, o);
-const jbad = {
-  'a job that runs npm with no job-level variable': ['does not set job-level', job('a', '', NPMSTEP)],
-  'a setup-node job with no job-level variable': ['does not set job-level', job('a', '', '      - uses: actions/setup-node@v4\n')],
-  'the variable only at step level (not the job)': ['does not set job-level', job('a', '', '      - name: i\n        env:\n          npm_config_ignore_scripts: "true"\n        run: npm ci --ignore-scripts\n')],
-  'the variable set to "false" at job level': ['an opt-out', job('a', '    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP)],
-  'the variable set to false at step level in a job that otherwise sets it': ['an opt-out', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore_scripts: false\n        run: npm ci --ignore-scripts\n')],
-  'the hyphen spelling set to 0': ['an opt-out', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore-scripts: "0"\n        run: npm ci --ignore-scripts\n')],
-  'an empty value': ['an opt-out', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore_scripts:\n        run: npm ci --ignore-scripts\n')],
-  'a flow-style env mapping': ['flow-style env', job('a', '    env: { npm_config_ignore_scripts: "true" }\n', NPMSTEP)],
+const OPTC = '# ignore-scripts-opt-out: this job exercises a dependency postinstall on purpose\n';
+const ENVSTEP = (val, above = '') => `      - name: i\n        env:\n${above}          npm_config_ignore_scripts: ${val}\n        run: npm ci --ignore-scripts\n`;
+const wbad = {
+  'no workflow-level env at all': ['no workflow-level env', wf('', JOB('', NPMSTEP))],
+  'a workflow-level env set to "false"': ['not exactly "true"', wf('env:\n  npm_config_ignore_scripts: "false"\n', JOB('', NPMSTEP))],
+  'the key only inside a block-scalar value (item 10)': ['no workflow-level env', wf('env:\n  X: |\n    npm_config_ignore_scripts: "true"\n', JOB('', NPMSTEP))],
+  'the key only at job level (not the workflow)': ['no workflow-level env', wf('', JOB('    env:\n      npm_config_ignore_scripts: "true"\n', NPMSTEP))],
+  'a job override to "false" with no comment': ['without an', wf(WENV, JOB('    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP))],
+  'a step override to false with no comment': ['without an', wf(WENV, JOB('', ENVSTEP('false')))],
+  'an override with a comment two lines above, not adjacent': ['without an', wf(WENV, JOB('', ENVSTEP('false', '          ' + OPTC + '          # unrelated\n')))],
+  'the opt-out comment with an empty reason': ['without an', wf(WENV, JOB('', ENVSTEP('false', '          # ignore-scripts-opt-out:\n')))],
+  'the hyphen spelling set to "0"': ['without an', wf(WENV, JOB('', ENVSTEP('"0"').replace('npm_config_ignore_scripts', 'npm_config_ignore-scripts')))],
+  'an empty override value': ['without an', wf(WENV, JOB('', ENVSTEP('')))],
+  'a flow-style env mapping': ['flow-style env', wf(WENV, JOB('    env: { npm_config_ignore_scripts: "false" }\n', NPMSTEP))],
+  'an override in a quoted-key job (item 6)': ['without an', wf(WENV, JOB('', NPMSTEP) + '  "b":\n    runs-on: x\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
+  'an override in a job whose key has a trailing comment (item 6)': ['without an', wf(WENV, JOB('', NPMSTEP) + '  b: # note\n    runs-on: x\n    env:\n      npm_config_ignore_scripts: "false"\n    steps:\n      - run: echo\n')],
+  'an override after a column-0 comment inside a job (item 7)': ['without an', wf(WENV, JOB('', NPMSTEP) + '# column-zero comment\n' + JOB('    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP, 'b'))],
+  'jobs: with a trailing comment and 4-space jobs read as no jobs (item 8)': ['no jobs were read', WENV + 'jobs: # x\n    a:\n      steps:\n        - run: echo\n'],
+  'a YAML alias used as an env value (item 9)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        env: *off\n        run: echo\n'))],
+  'a YAML merge key (item 9)': ['anchor or alias', wf(WENV, JOB('    env:\n      <<: *off\n', NPMSTEP))],
+  // item 3: the whole run text
+  'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
+  'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
+  'unset npm_config_ignore_scripts': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: unset npm_config_ignore_scripts\n'))],
+  'env -u npm_config_ignore_scripts': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: env -u npm_config_ignore_scripts npm update\n'))],
+  'a write to $GITHUB_ENV': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: echo npm_config_ignore_scripts=false >> $GITHUB_ENV\n'))],
+  'npm update --no-ignore-scripts (a subcommand NPM_CMD does not list)': ['override flag', wf(WENV, JOB('', '      - run: npm update --no-ignore-scripts\n'))],
+  'npm link --ignore-scripts=false': ['override flag', wf(WENV, JOB('', '      - run: npm link --ignore-scripts=false\n'))],
 };
-for (const [label, [needle, t]] of Object.entries(jbad)) {
-  const r = jv('fixture.yml', t);
-  r.some((x) => x.includes(needle)) ? ok(`job rule rejects: ${label}`) : no(`job rule did NOT reject: ${label}`, JSON.stringify(r));
+for (const [label, [needle, t]] of Object.entries(wbad)) {
+  const r = violations('fixture.yml', t);
+  r.some((x) => x.includes(needle)) ? ok(`workflow-env rule rejects: ${label}`) : no(`workflow-env rule did NOT reject: ${label}`, JSON.stringify(r));
 }
-// Accepting side: the rule is not a blanket.
-for (const [label, t, o] of [
-  ['a job with the variable at job level, as "true"', job('a', ENVT, NPMSTEP)],
-  ['an unquoted true', job('a', '    env:\n      npm_config_ignore_scripts: true\n', NPMSTEP)],
-  ['a job that runs no npm and has no setup-node', job('a', '', '      - name: x\n        run: echo hi\n')],
-  ['the variable true at job level and again at step level', job('a', ENVT, '      - name: i\n        env:\n          npm_config_ignore_scripts: "true"\n        run: npm ci --ignore-scripts\n')],
-  ['a listed opt-out with its reason on the line above', job('a', '    env:\n      # opt-out reason: this job exercises a dependency postinstall on purpose\n      npm_config_ignore_scripts: "false"\n', NPMSTEP), ['fixture.yml:a']],
+// Accepting side: the rule is not a blanket, and inheritance covers a job the old detector
+// could not see as an npm job.
+for (const [label, t] of [
+  ['a new job with no setup-node running npm update (covered by inheritance)', wf(WENV, JOB('', '      - run: npm update\n', 'new'))],
+  ['a job that runs /usr/bin/npm link (covered by inheritance)', wf(WENV, JOB('', '      - run: /usr/bin/npm link\n', 'new'))],
+  ['a script that calls npm (covered by inheritance)', wf(WENV, JOB('', '      - run: bash scripts/does-npm.sh\n', 'new'))],
+  ['the variable true at job level too', wf(WENV, JOB('    env:\n      npm_config_ignore_scripts: true\n', NPMSTEP))],
+  ['the variable true at step level too', wf(WENV, JOB('', ENVSTEP('"true"')))],
+  ['an override with the adjacent opt-out comment', wf(WENV, JOB('', ENVSTEP('false', '          ' + OPTC)))],
+  ['a plain =true assignment in a run line', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=true npm ci --ignore-scripts\n'))],
+  ['a quoted job key with no override', wf(WENV, JOB('', NPMSTEP, '"quoted"'))],
+  ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
-  const r = jv('fixture.yml', t, o);
-  r.length === 0 ? ok(`job rule accepts: ${label}`) : no(`job rule rejected: ${label}`, JSON.stringify(r));
+  const r = violations('fixture.yml', t);
+  r.length === 0 ? ok(`workflow-env rule accepts: ${label}`) : no(`workflow-env rule rejected: ${label}`, JSON.stringify(r));
 }
-// A listed opt-out WITHOUT its reason is still refused.
+// An accepted opt-out is LISTED, once, with its reason; a refused one is not.
 {
-  const t = job('a', '    env:\n      npm_config_ignore_scripts: "false"\n', NPMSTEP);
-  const r = jv('fixture.yml', t, ['fixture.yml:a']);
-  r.some((x) => x.includes("no 'opt-out reason:'")) ? ok('job rule refuses a listed opt-out with no reason') : no('job rule accepted a listed opt-out with no reason', JSON.stringify(r));
+  const okT = wf(WENV, JOB('', ENVSTEP('false', '          ' + OPTC)));
+  const listed = workflowOptOuts('fixture.yml', okT);
+  listed.length === 1 && listed[0].includes('exercises a dependency postinstall') ? ok('an accepted opt-out is listed with its reason') : no('the accepted opt-out was not listed', JSON.stringify(listed));
+  workflowOptOuts('fixture.yml', wf(WENV, JOB('', ENVSTEP('false')))).length === 0 ? ok('a refused opt-out (no comment) is not listed as accepted') : no('a comment-less override was listed as an accepted opt-out');
 }
-// The pinned list is empty today.
-OPT_OUTS.length === 0 ? ok('the pinned opt-out list is empty') : no(`the opt-out list is not empty: ${OPT_OUTS}`);
 
 // And a matching good fixture passes, so the rejections are not blanket.
 const good = wrap(CO + CHECK + '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: npm install -g --ignore-scripts "x@$V"\n      - name: q\n        run: v="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"\n');
@@ -436,5 +507,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 112) { console.log('ran fewer than the 112 expected passing cases'); process.exit(1); }
+if (pass < 133) { console.log('ran fewer than the 133 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);

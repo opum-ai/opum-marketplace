@@ -30,6 +30,11 @@ on:
 permissions:
   contents: read
 
+# OMARK-111 (DEC-277 a1): the same workflow-level variable ci.yml sets; this workflow runs no npm
+# today, so this makes a later npm step safe by inheritance rather than by recognition.
+env:
+  npm_config_ignore_scripts: "true"
+
 jobs:
   promotion-is-manual:
     # Always fails on a PR into main, on purpose: the merge button is the wrong

@@ -23,19 +23,22 @@ concurrency:
 permissions:
   contents: read
 
+# OMARK-111 (DEC-277 a1, opum-doc; supersedes OMARK-109's per-job variable). npm skips
+# dependency lifecycle scripts in EVERY job and step, whatever npm command runs, because the
+# variable is set once here and inherited. A command-line override (--no-ignore-scripts,
+# --ignore-scripts=false) outranks the environment: scripts/test/workflow-hardening.test.mjs
+# refuses that, and an override of the variable in a job or step, unless the line above it is
+# `# ignore-scripts-opt-out: <reason>`. No job opts out today. The install proof in the
+# manifest job sets the variable false itself, scoped to its own npm, for its flag arm and its
+# control arm.
+env:
+  npm_config_ignore_scripts: "true"
+
 jobs:
   # Validates every plugin and marketplace manifest parses and matches itself.
   manifest:
     name: check · manifests
     runs-on: ubuntu-latest
-    # OMARK-109 (DEC-240, opum-doc ruling A): npm skips dependency lifecycle scripts for the
-    # commands in this job, unless a command line overrides it (--no-ignore-scripts or
-    # --ignore-scripts=false outrank the environment; the line lint in
-    # scripts/test/workflow-hardening.test.mjs is the backstop for that and for keeping this
-    # line from being dropped). No job opts out. The install proof below sets the variable
-    # false itself, scoped to its own npm, for its flag arm and its control arm.
-    env:
-      npm_config_ignore_scripts: "true"
     steps:
       # fetch-depth: 0, deliberately. The default shallow checkout has no merge
       # base with the base branch, so the diff below exits 128 instead of
@@ -265,13 +268,6 @@ jobs:
   lore-check:
     name: lore check
     runs-on: ubuntu-latest
-    # OMARK-109 (DEC-240, opum-doc ruling A): npm skips dependency lifecycle scripts for the
-    # commands in this job, unless a command line overrides it (--no-ignore-scripts or
-    # --ignore-scripts=false outrank the environment; the line lint in
-    # scripts/test/workflow-hardening.test.mjs is the backstop for that and for keeping this
-    # line from being dropped). No job opts out. The npm install line below also passes --ignore-scripts, a second control.
-    env:
-      npm_config_ignore_scripts: "true"
     steps:
       # persist-credentials: false (DEC-240 item 2): this job pushes nothing and
       # needs no token after checkout.
@@ -353,13 +349,6 @@ jobs:
   tracker:
     name: Tracker integrity
     runs-on: ubuntu-latest
-    # OMARK-109 (DEC-240, opum-doc ruling A): npm skips dependency lifecycle scripts for the
-    # commands in this job, unless a command line overrides it (--no-ignore-scripts or
-    # --ignore-scripts=false outrank the environment; the line lint in
-    # scripts/test/workflow-hardening.test.mjs is the backstop for that and for keeping this
-    # line from being dropped). No job opts out. The npm install line below also passes --ignore-scripts, a second control.
-    env:
-      npm_config_ignore_scripts: "true"
     steps:
       # persist-credentials: false (DEC-240 item 2): no push, no token needed
       # after checkout.
