@@ -27,8 +27,10 @@ permissions:
 # dependency lifecycle scripts in EVERY job and step, whatever npm command runs, because the
 # variable is set once here and inherited. A command-line override (--no-ignore-scripts,
 # --ignore-scripts=false) outranks the environment: scripts/test/workflow-hardening.test.mjs
-# refuses the spellings a line scanner can read (any case, repeated no-, abbreviated names),
-# not an abbreviation that never spells the name or a command the shell assembles at run time.
+# refuses every spelling of the flag npm's parser reads (any case, repeated no-, abbreviations,
+# quotes inside the word), `env -i`, BASH_ENV and a non-mapping env:. It cannot see a flag the
+# shell assembles at run time, or one inside a script or local action it never opens; those
+# residuals are recorded on OMARK-111.
 # It also refuses an override of the variable in a job or step, unless the line above it is
 # `# ignore-scripts-opt-out: <reason>`. No job opts out today. The install proof in the
 # manifest job sets the variable false itself, scoped to its own npm, for its flag arm and its

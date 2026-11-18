@@ -74,7 +74,7 @@ fi
 [ -e "$S/MARKER" ] && ok "control: without --ignore-scripts the postinstall RAN ($mode)" || no "control: the postinstall never ran, so the accepting arm proved nothing ($mode)" "$(cat "$S/arm2.log")"
 [ "$rc2" -ne 0 ] && ok "control: that install exited non-zero ($rc2), so the failing script really would break an unhardened install" || no 'control: the install exited 0 even though the script ran and failed' "$(cat "$S/arm2.log")"
 
-# Arm 3 (OMARK-109): the JOB-LEVEL variable alone, with NO --ignore-scripts on the command line.
+# Arm 3 (OMARK-109, updated by OMARK-111): the variable alone (the workflow-level one in CI), with NO --ignore-scripts on the command line.
 # This is what closes the class the line lint cannot (npm update, link, init, quoted or
 # path-prefixed npm, a flag in a comment, and so on): the same failing postinstall must not
 # run and the install must succeed. Arm 2 is its control: the same command (with the same mode
