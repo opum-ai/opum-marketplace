@@ -32,6 +32,9 @@ permissions:
 
 # OMARK-111 (DEC-277 a1): the same workflow-level variable ci.yml sets; this workflow runs no npm
 # today, so this makes a later npm step safe by inheritance rather than by recognition.
+# scripts/test/workflow-hardening.test.mjs guards it; its claim (DEC-277 a2): "catches plain-text and
+# accidental overrides of the workflow-level protection; not a defence against an adversarial
+# workflow author".
 env:
   npm_config_ignore_scripts: "true"
 
