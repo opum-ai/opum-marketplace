@@ -192,9 +192,12 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // non-comment line except ${...} and ${{ }}, because each round's gap was a classification step the
 // evading form manipulated; plus the de-quoted value word after --ignore-scripts, refused when it holds
 // a $' / $" / brace form. Cheap extras kept: env -i, env -, BASH_ENV, npm 12's allow-all flag.
-// SCOPE PENDING opum-doc: refusing the structural forms at EVERY position (including | bodies and heredocs)
-// is broader than (a2) Q2 A's "option-like or variable-naming tokens"; it refuses `awk '{print $1, $2}'`,
-// `jq '{name, version}'` and `const { a, b } = require('fs')`. Kept until opum-doc rules.
+// DEC-277 (a3) (opum-doc, ODOC-615) amends (a2) Q2's shell side: brace groups (comma or ..) and $' / $" are
+// refused at EVERY position of every non-comment line, bodies and heredocs included. The breadth is
+// deliberate and tested: grep '^x$', awk '{print $1, $2}', jq '{name, version}', a destructuring
+// node -e body and `echo {a,b}` are all REFUSED, with a message that names the rule and its remedy (move
+// the text into a script file the step runs, or restructure it). The `# ignore-scripts-opt-out:` comment
+// does not extend to this rule.
 // DECLINED BY NAME (a line scanner is the design; a parser is a dependency, DEC-182 (1)): all shell
 // expansion and quoting deq does not model ($A$B, eval, indirect expansion, parameter expansion, command
 // substitution); any interpreter assembling the name (node, python, perl, a script file called from
@@ -409,7 +412,7 @@ export function readabilityViolations(file, text) {
     // or `..`, and `$'` or `$"` quoting.
     {
       const bare = ln.replace(/\$\{\{.*?\}\}/g, '').replace(/\$\{[^{}]*\}/g, '');
-      if (/\$['"]/.test(ln) || /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) v.push(`${file}:${k + 1}: structural shell form (brace group, $' or $" quoting) is not read by this checker: ${ln.trim()}`);
+      if (/\$['"]/.test(ln) || /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) v.push(`${file}:${k + 1}: structural shell form (a brace group with a comma or .., or $' or $" quoting) is refused at every position by DEC-277 (a3); move the text into a script file the step runs, or restructure it: ${ln.trim()}`);
     }
     if (/\bBASH_ENV\b/.test(deq(ln))) v.push(`${file}:${k + 1}: BASH_ENV names a file the shell runs first and could unset the variable`);
     const toks = deq(ln).split(/\s+/);
@@ -761,6 +764,15 @@ const wbad = {
   'a brace group as the value word after a bare flag, via the guard itself (r5 B1)': ['override flag', wf(WENV, JOB('', '      - run: npm update --ignore-scripts {false,true}\n'))],
   '$\'..\' as the value word after a bare flag, via the guard itself (r5 B1)': ['override flag', wf(WENV, JOB('', "      - run: npm ci --ignore-scripts fa$'lse'\n"))],
   'a step whose SECOND key is uses: ./.github/workflows/sub/x.yml (r5 N3)': ['local action', wf(WENV, JOB('', '      - name: x\n        uses: ./.github/workflows/sub/x.yml\n'))],
+  // DEC-277 (a3): the breadth is deliberate. Each ordinary form is REFUSED, with the rule and its remedy.
+  "grep -q '^x$' f (a3 ordinary form)": ['move the text into a script file the step runs', wf(WENV, JOB('', "      - run: grep -q '^x$' f\n"))],
+  "awk '{print $1, $2}' (a3 ordinary form)": ['move the text into a script file the step runs', wf(WENV, JOB('', "      - run: awk '{print $1, $2}' f\n"))],
+  "jq '{name, version}' (a3 ordinary form)": ['move the text into a script file the step runs', wf(WENV, JOB('', "      - run: jq '{name, version}' package.json\n"))],
+  'a destructuring node -e body (a3 ordinary form)': ['move the text into a script file the step runs', wf(WENV, JOB('', "      - run: node -e \"const { a, b } = require('fs')\"\n"))],
+  'echo {a,b} (a3: formerly an accepting fixture, now deliberately refused)': ['move the text into a script file the step runs', wf(WENV, JOB('', '      - run: echo {a,b}\n'))],
+  'echo {a,b} inside a | body (a3: bodies included)': ['move the text into a script file the step runs', wf(WENV, JOB('', '      - run: |\n          echo {a,b}\n'))],
+  'the opt-out comment above a brace-group line does not suppress it (a3)': ['move the text into a script file the step runs', wf(WENV, JOB('', '      # ignore-scripts-opt-out: this job needs scripts\n      - run: echo {a,b}\n'))],
+  'the opt-out comment above a $\' line does not suppress it (a3)': ['move the text into a script file the step runs', wf(WENV, JOB('', "      # ignore-scripts-opt-out: this job needs scripts\n      - run: echo $'x'\n"))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -875,5 +887,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 255) { console.log('ran fewer than the 255 expected passing cases'); process.exit(1); }
+if (pass < 263) { console.log('ran fewer than the 263 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
