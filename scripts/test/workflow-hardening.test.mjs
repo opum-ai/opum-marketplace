@@ -74,8 +74,9 @@ function runText(step) {
 
 // Shell continuation lines are one command: join them before any rule reads a
 // line, or `npm install \\\n  -g pkg` hides its -g on the next physical line.
-// bash deletes a backslash-newline outright, so `--no-ignore-\` + `scripts` is ONE word; the
-// following line's own indentation stays and still separates words (OMARK-111 round 3).
+// bash deletes a backslash-newline outright, so `--no-ignore-\` + `scripts` is ONE word. This regex
+// also removes the next line's own indentation: over-joining, which only makes the scans stricter
+// (bash would keep that whitespace as a word separator). OMARK-111 round 3 N3.
 const joinContinuations = (t) => t.replace(/\\\n\s*/g, '');
 
 // The npm subcommands LISTED in the alternation below (install, i, add, ci, exec, x,
@@ -110,8 +111,9 @@ const NPM_CMD = /(^|[\s;&|(])(npm\b[^;&|\n]*?\s(install|i|add|ci|exec|x|rebuild|
 // the dashes and any run of `no-` removed and cut at the first character that is not a letter,
 // `-` or `_`, is a prefix of `ignore-scripts` of at least two characters (`ig`) or contains
 // `ignore-script`. Only the exact bare flag and `--ignore-scripts=true` are allowed. NOT closable
-// by a line scanner: a flag the shell assembles at run time (`$A$B`, `eval`), or one that lives
-// in a file this reader never opens (a script, a local composite action).
+// by a line scanner: a flag or name that ANY interpreter assembles (the shell with `$A$B` or `eval`,
+// `node -e`, github-script `core.exportVariable('npm_config_ignore_' + 'scripts', ...)`), or one that
+// lives in a file this reader never opens (a script, a local composite action).
 const deq = (t) => t.replace(/['"\\]/g, '');
 const IGNORE_NAME = 'ignore-scripts';
 function optionName(raw) {
@@ -131,7 +133,9 @@ const hasBadIgnoreFlag = (cmd) => flagOccurrences(cmd).length > 0 && !hasIgnoreS
 // OMARK-111 item 7: npm 12's --dangerously-allow-all-scripts (and its npm_config_ form). Which of it
 // and ignore-scripts wins on npm 12 is UNMEASURED; refused in workflows so it cannot be the bypass
 // the day CI moves to npm 12. Only scripts/test/install-ignore-scripts.test.sh (not read here) uses it.
-const hasAllowAllScripts = (cmd) => /dangerously[-_]allow[-_]all[-_]scripts/i.test(deq(cmd));
+const ALLOW_ALL_NAME = 'dangerously-allow-all-scripts';
+const hasAllowAllScripts = (cmd) => /dangerously[-_]allow[-_]all[-_]scripts/i.test(deq(cmd)) ||
+  [...cmd.matchAll(/\S+/g)].some((m) => { const nm = optionName(m[0]); return nm !== null && nm.length >= 4 && ALLOW_ALL_NAME.startsWith(nm); });
 const hasIgnoreScripts = (cmd) => {
   const occ = flagOccurrences(cmd);
   if (occ.length === 0) return false;
@@ -323,7 +327,12 @@ export function readabilityViolations(file, text) {
     // ...no > folds, no ? keys, no expression keys, no anchors or aliases (those are in workflowEnvViolations).
     if (/(?::|^\s*-)\s*>[-+1-9]*\s*(?:#.*)?$/.test(l)) v.push(`${file}:${i + 1}: a > folded block scalar is not read by this checker; use a | body or a single-line scalar`);
     if (/^\s*(?:-\s+)?\?(?:\s|$)/.test(l)) v.push(`${file}:${i + 1}: a ? explicit key is not read by this checker; write the key plainly`);
-    if (/^\s*(?:-\s+)*["']?\$\{\{.*?\}\}["']?\s*:(?:\s|$)/.test(l)) v.push(`${file}:${i + 1}: an expression key (an expression before the colon) is not read by this checker; the key's name never appears in the file`);
+    const keyEnd = l.search(/:(\s|$)/);
+    if (keyEnd >= 0 && l.slice(0, keyEnd).includes('${' + '{')) v.push(`${file}:${i + 1}: an expression key (an expression before the colon) is not read by this checker; the key's name never appears in the file`);
+    // B6: an anchor or alias at a key or value position (`X: &k name`, `*k : v`), outside bodies.
+    if (/(^\s*|:\s+|-\s+)[&*][\w-]+(\s|$)/.test(l)) v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x) is not read by this checker; write the value out`);
+    // N4: a step that runs a local action reads files this checker never opens.
+    if (/^\s*(?:-\s+)?["']?uses["']?\s*:\s*["']?\.\//.test(l) && !/uses["']?\s*:\s*["']?\.\/\.github\/workflows\//.test(l)) v.push(`${file}:${i + 1}: a local action (uses: ./...) is not read by this checker; its env: and run: are never opened`);
     {
       // Single-line scalars elsewhere: a quoted scalar must close on its own line, and a plain or
       // quoted scalar may not continue on a more-indented line below.
@@ -363,13 +372,13 @@ export function readabilityViolations(file, text) {
     // DEC-277 (a2): the structural shell forms, in option-like or variable-naming tokens only.
     for (const t of ln.split(/\s+/)) {
       const n = deq(t);
-      const naming = /npm_config_i/i.test(n);
-      const optionLike = /^[^\w\s-]*-/.test(n) || n.includes('--');
+      const naming = /npm_config_/i.test(n);
+      const optionLike = /^[^\w\s-]*-/.test(n) || n.includes('--') || /^[^\w\s]*\$['"]/.test(t);
       if (!naming && !optionLike) continue;
       const bare = t.replace(/\$\{\{[^}]*\}\}/g, '').replace(/\$\{[^{}]*\}/g, '');
       if (/\$['"]/.test(t) || /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) { v.push(`${file}:${k + 1}: structural shell form (brace group, $' or $" quoting) in an option-like or variable-naming token: ${t}`); break; }
     }
-    if (/\bBASH_ENV\b/.test(ln)) v.push(`${file}:${k + 1}: BASH_ENV names a file the shell runs first and could unset the variable`);
+    if (/\bBASH_ENV\b/.test(deq(ln))) v.push(`${file}:${k + 1}: BASH_ENV names a file the shell runs first and could unset the variable`);
     const toks = deq(ln).split(/\s+/);
     toks.forEach((t, x) => {
       if (t !== 'env' && !t.endsWith('/env')) return;
@@ -484,8 +493,10 @@ topEnvs === files.length ? ok(`all ${files.length} workflows set the workflow-le
 // DEC-277 (a2) Q1 (opum-doc ruling): a commented opt-out passes and is LISTED above, as (a1) point 3
 // says; the second look is the DEC-183 review every workflow change gets. No zero-opt-out assertion.
 ok(`${optOutsListed} opt-out(s) listed above`);
-// OMARK-111 item 10: a local composite action's env: and run: live outside wfDir and are never
-// read. None exists today; this goes red the day one is added, so the gap cannot open silently.
+// OMARK-111 item 10: a local composite action's env: and run: live outside wfDir and are never read.
+// A step `uses: ./path` is refused above (readabilityViolations); this is a second tripwire for the
+// conventional directory. Third-party actions can also core.exportVariable for later steps: a trust
+// class this lint does not and cannot cover (DECLINED BY NAME).
 !existsSync(path.join(wfDir, '..', 'actions')) ? ok('no local composite actions exist under .github/actions (their env: and run: would not be read)') : no('.github/actions exists: a local composite action is not read by this checker');
 stepCount >= 25 ? ok(`read ${stepCount} steps across ${files.length} workflows`) : no(`read only ${stepCount} steps; the reader is not seeing the workflows`);
 checkouts === 4 ? ok('found all 4 actions/checkout steps') : no(`expected 4 checkout steps, found ${checkouts}`);
@@ -686,6 +697,17 @@ const wbad = {
   'ANSI-C $\'...\' quoting inside the flag (B5)': ['structural shell form', wf(WENV, JOB('', "      - run: npm update --$'ignore-scripts'=false\n"))],
   'locale $\"...\" quoting inside the flag (B5)': ['structural shell form', wf(WENV, JOB('', '      - run: npm update --ignore-$"scripts"=false\n'))],
   'ANSI-C quoting inside the variable name (B5)': ['structural shell form', wf(WENV, JOB('', "      - run: export npm_config_ignore_$'scripts'=false\n"))],
+  // round 3 reviewer (e5400c0) B3-B6 and N1, N2, N4, folded into the (a2) contract
+  'a multi-line double-quoted scalar hiding an escaped flag (B4, reviewer fixture)': ['multi-line quoted scalar', wf(WENV, JOB('', '      - run: "npm update\n          --no-ignor\\x65-scripts\n          "\n'))],
+  'a brace group splitting the flag name (B5)': ['structural shell form', wf(WENV, JOB('', '      - run: npm update --{,no-}ignore-scripts\n'))],
+  'a brace group inside the variable name (B5)': ['structural shell form', wf(WENV, JOB('', '      - run: export npm_config_{ignore,x}_scripts=false\n'))],
+  'ANSI-C quoting that hides the dash, inside a | body (B5)': ['structural shell form', wf(WENV, JOB('', "      - run: |\n          npm update $'\\x2d-no-ignore-scripts'\n"))],
+  'an expression key as the second env entry (B6)': ['expression key', wf(WENV, JOB('    env:\n      V: 1\n      ${{ format(\'npm_config_{0}_scripts\', \'ignore\') }}: "false"\n', NPMSTEP))],
+  'an alias used as an env key (B6)': ['anchor or alias', 'env:\n  npm_config_ignore_scripts: "true"\n  X: &k npm_config_ignore_scripts\njobs:\n' + JOB('    env:\n      *k : "false"\n', NPMSTEP)],
+  'an explicit ? key spelling env (B6)': ['explicit key', wf(WENV, JOB('    ? env\n    : ${{ fromJSON(vars.E) }}\n', NPMSTEP))],
+  'BASH_"ENV" with quotes inside the name (N1)': ['BASH_ENV', wf(WENV, JOB('', '      - run: export BASH_"ENV"=x\n'))],
+  'an abbreviated --dangerously-allow (N2)': ['allows all scripts', wf(WENV, JOB('', '      - run: npm update --dangerously-allow\n'))],
+  'a step running a local action (N4)': ['local action', wf(WENV, JOB('', '      - uses: ./some/action\n'))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -729,6 +751,8 @@ for (const [label, t] of [
   ['an option with a ${VAR} value (a2 accept)', wf(WENV, JOB('', '      - run: npm run build -- --registry=${REG} --prefix="${P:-x,y}"\n'))],
   ['a | body with a backslash and a name with a colon (a2 accept)', wf(WENV, JOB('', '      - name: "step: one"\n        run: |\n          echo a\\\\b\n'))],
   ['a mapping key whose children are indented (a2 accept)', wf(WENV, JOB('    env:\n      A: 1\n', NPMSTEP))],
+  ['a local reusable workflow under .github/workflows (N4 accept)', wf(WENV, '  a:\n    uses: ./.github/workflows/x.yml\n')],
+  ['an unrelated option and a one-letter option below the 4-character abbreviation floor (N2 accept)', wf(WENV, JOB('', '      - run: npm run build --dry-run --if-present --d\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -790,5 +814,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 217) { console.log('ran fewer than the 217 expected passing cases'); process.exit(1); }
+if (pass < 229) { console.log('ran fewer than the 229 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
