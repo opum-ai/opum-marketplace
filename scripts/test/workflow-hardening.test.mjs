@@ -146,6 +146,7 @@ const hasIgnoreScripts = (cmd) => {
     // The value word is read the way bash hands it to npm: quotes and backslashes deleted
     // (`"fa"lse`, `fals\e` are `false`), OMARK-111 round 3 B2.
     const nxt = cmd.slice(m.index + m[0].length).match(/^\s+(\S+)/);
+    if (nxt && (/\$['"]/.test(nxt[1]) || /[{}]/.test(nxt[1]))) return false;
     return !(nxt && /^(true|false|null|undefined|[0-9]+)(?:[)<>`;&|].*)?$/i.test(deq(nxt[1])));
   });
 };
@@ -176,14 +177,19 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // (logical lines, joined across a trailing backslash): an override flag in any spelling nopt reads
 // (flagOccurrences), the variable's name outside the top-level env block (variableTouches), `env -i`,
 // `env -` and BASH_ENV, and npm 12's allow-all-scripts flag. readabilityViolations refuses the YAML
-// this reader cannot follow: a non-mapping env:, and a double-quoted scalar with a backslash.
+// this reader cannot follow (the layout allowlist in the CONTRACT below) and the structural shell forms.
 // STATED CLAIM (DEC-277 (a2), opum-doc, verbatim): "catches plain-text and accidental overrides of the
 // workflow-level protection; not a defence against an adversarial workflow author".
-// CONTRACT (DEC-277 (a2) Q2, A): YAML side, a strict layout allowlist: | bodies only; single-line
-// scalars elsewhere; no > folds or plain-scalar continuations; no backslash outside bodies; no anchors,
-// aliases, ? keys or expression keys (readabilityViolations, workflowEnvViolations). Shell side, only the
-// structural forms: brace groups, $' and $" in option-like or variable-naming tokens, and the de-quoted
-// value word after --ignore-scripts. Cheap extras kept: env -i, env -, BASH_ENV, npm 12's allow-all flag.
+// CONTRACT (DEC-277 (a2) Q2, A): YAML side, a strict layout allowlist, enforced in readabilityViolations:
+// | bodies only; outside them every line is a key line, a `- ` item or a block header (so no plain
+// scalar on its own line or continued on the next); no > folds (header anywhere, nested too); no
+// backslash outside bodies; no multi-line quoted scalars; no anchors, aliases or tags (any non-space
+// name, at any node position); no ? keys; no expression keys; env: only as a block mapping; no step or
+// node `uses: ./...` (a job-level `uses: ./.github/workflows/x.yml` is read, so allowed). Shell side, only
+// the structural forms: brace groups (comma or ..) and $' or $" quoting, refused at EVERY position of a
+// non-comment line except ${...} and ${{ }}, because each round's gap was a classification step the
+// evading form manipulated; plus the de-quoted value word after --ignore-scripts, refused when it holds
+// a $' / $" / brace form. Cheap extras kept: env -i, env -, BASH_ENV, npm 12's allow-all flag.
 // DECLINED BY NAME (a line scanner is the design; a parser is a dependency, DEC-182 (1)): all shell
 // expansion and quoting deq does not model ($A$B, eval, indirect expansion, parameter expansion, command
 // substitution); any interpreter assembling the name (node, python, perl, a script file called from
@@ -298,12 +304,15 @@ export function logicalLines(text) {
 
 // Line indexes inside a block-scalar body (`key: |`, `- >-`): shell text where backslashes and
 // quotes are not YAML syntax. Everything else is YAML the line reader must understand.
+// A block-scalar header: optional `- ` items (nested too), an optional key, then | or > with an
+// optional chomping or indentation indicator. Group 1 indent, 2 the dashes, 3 the indicator.
+const BLOCK_HEADER = /^(\s*)((?:-\s+)*)(?:["']?[\w.-]+["']?\s*:\s*)?([|>])[-+1-9]*\s*(?:#.*)?$/;
 function blockBodyLines(lines) {
   const body = new Set();
   for (let i = 0; i < lines.length; i++) {
-    const h = lines[i].match(/^(\s*)(-\s+)?(?:["']?[\w.-]+["']?\s*:\s*)?[|>][-+1-9]*\s*(?:#.*)?$/);
+    const h = lines[i].match(BLOCK_HEADER);
     if (!h || /^\s*#/.test(lines[i])) continue;
-    const hasKey = /:\s*[|>]/.test(lines[i]);
+    const hasKey = /:\s*[|>]/.test(lines[i]) && h[2] !== undefined;
     const keyCol = h[1].length + (hasKey && h[2] ? h[2].length : 0);
     for (let j = i + 1; j < lines.length && (lines[j].trim() === '' || indentOf(lines[j]) > keyCol); j++) body.add(j);
   }
@@ -325,14 +334,17 @@ export function readabilityViolations(file, text) {
     // YAML escape in a double-quoted scalar, or a continuation this reader would read differently).
     if (/\\/.test(l)) v.push(`${file}:${i + 1}: a backslash escape outside a | block body is not read by this checker (YAML decodes it in a double-quoted scalar); write it without one`);
     // ...no > folds, no ? keys, no expression keys, no anchors or aliases (those are in workflowEnvViolations).
-    if (/(?::|^\s*-)\s*>[-+1-9]*\s*(?:#.*)?$/.test(l)) v.push(`${file}:${i + 1}: a > folded block scalar is not read by this checker; use a | body or a single-line scalar`);
+    if (BLOCK_HEADER.exec(l)?.[3] === '>') v.push(`${file}:${i + 1}: a > folded block scalar is not read by this checker; use a | body or a single-line scalar`);
     if (/^\s*(?:-\s+)?\?(?:\s|$)/.test(l)) v.push(`${file}:${i + 1}: a ? explicit key is not read by this checker; write the key plainly`);
     const keyEnd = l.search(/:(\s|$)/);
     if (keyEnd >= 0 && l.slice(0, keyEnd).includes('${' + '{')) v.push(`${file}:${i + 1}: an expression key (an expression before the colon) is not read by this checker; the key's name never appears in the file`);
-    // B6: an anchor or alias at a key or value position (`X: &k name`, `*k : v`), outside bodies.
-    if (/(^\s*|:\s+|-\s+)[&*][\w-]+(\s|$)/.test(l)) v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x) is not read by this checker; write the value out`);
-    // N4: a step that runs a local action reads files this checker never opens.
-    if (/^\s*(?:-\s+)?["']?uses["']?\s*:\s*["']?\.\//.test(l) && !/uses["']?\s*:\s*["']?\.\/\.github\/workflows\//.test(l)) v.push(`${file}:${i + 1}: a local action (uses: ./...) is not read by this checker; its env: and run: are never opened`);
+    // An anchor, alias or tag at any node position (line start, after `: `, `- `, `? `, a tag or an
+    // anchor), with ANY non-space name: YAML names are not limited to [\w-].
+    if (/(^\s*|:\s+|-\s+|\?\s+|!\S*\s+)[&*]\S/.test(l)) v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x) is not read by this checker; write the value out`);
+    if (/(^\s*|:\s+|-\s+|\?\s+|[&*]\S+\s+)!/.test(l)) v.push(`${file}:${i + 1}: a YAML tag (!x) at a node position is not read by this checker; write the value plainly`);
+    // N2: a step or any other node that runs a local action reads files this checker never opens. The
+    // one exception is a job-level `uses:` of a workflow file (read, because it lives in wfDir).
+    if (/^\s*(?:-\s+)?["']?uses["']?\s*:\s*["']?\.\//.test(l) && !(!/^\s*-/.test(l) && /uses["']?\s*:\s*["']?\.\/\.github\/workflows\/\S+\.ya?ml["']?\s*(?:#.*)?$/.test(l))) v.push(`${file}:${i + 1}: a local action (uses: ./...) is not read by this checker; its env: and run: are never opened`);
     {
       // Single-line scalars elsewhere: a quoted scalar must close on its own line, and a plain or
       // quoted scalar may not continue on a more-indented line below.
@@ -340,6 +352,11 @@ export function readabilityViolations(file, text) {
       const content = sm[3];
       const kv = content.match(/^(?:"[^"]*"|'[^']*'|[^\s"'#:][^#]*?)\s*:\s+(\S.*)$/);
       const value = (kv ? kv[1] : (/:\s*(?:#.*)?$/.test(content) || content === '' ? '' : content));
+      // Outside | bodies every line is a key line, a `- ` item or a block header: anything else is the
+      // start or the continuation of a plain scalar placed on its own line.
+      if (sm[2] === '' && content !== '' && !kv && !/:\s*(?:#.*)?$/.test(content) && !BLOCK_HEADER.test(l)) {
+        v.push(`${file}:${i + 1}: a line that is not a key line, a - item or a block header (a plain scalar on its own line) is not read by this checker`);
+      }
       const vv = value.replace(/(^|\s)#.*$/, '').trim();
       if (vv !== '' && !/^[|>{[]/.test(vv)) {
         if ((vv.startsWith('"') && !/^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(value.trim())) || (vv.startsWith("'") && !/^'(?:[^']|'')*'\s*(?:#.*)?$/.test(value.trim()))) {
@@ -369,14 +386,13 @@ export function readabilityViolations(file, text) {
     // Item 7 (npm 12): UNMEASURED which of this and ignore-scripts wins; refused until measured.
     if (hasAllowAllScripts(ln)) v.push(`${file}:${k + 1}: --dangerously-allow-all-scripts (or its npm_config_ form) allows all scripts and may outrank ignore-scripts on npm 12: ${ln.trim()}`);
     // Item 6: removing the environment without naming the variable.
-    // DEC-277 (a2): the structural shell forms, in option-like or variable-naming tokens only.
-    for (const t of ln.split(/\s+/)) {
-      const n = deq(t);
-      const naming = /npm_config_/i.test(n);
-      const optionLike = /^[^\w\s-]*-/.test(n) || n.includes('--') || /^[^\w\s]*\$['"]/.test(t);
-      if (!naming && !optionLike) continue;
-      const bare = t.replace(/\$\{\{[^}]*\}\}/g, '').replace(/\$\{[^{}]*\}/g, '');
-      if (/\$['"]/.test(t) || /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) { v.push(`${file}:${k + 1}: structural shell form (brace group, $' or $" quoting) in an option-like or variable-naming token: ${t}`); break; }
+    // DEC-277 (a2): the structural shell forms. Every round's gap was a classification step the evading
+    // form could manipulate (which token is option-like, which names the variable), so these are refused
+    // at EVERY position in any non-comment line, except `${...}` and `${{ }}`: a brace group with a comma
+    // or `..`, and `$'` or `$"` quoting.
+    {
+      const bare = ln.replace(/\$\{\{.*?\}\}/g, '').replace(/\$\{[^{}]*\}/g, '');
+      if (/\$['"]/.test(ln) || /\{[^{}]*(?:,|\.\.)[^{}]*\}/.test(bare)) v.push(`${file}:${k + 1}: structural shell form (brace group, $' or $" quoting) is not read by this checker: ${ln.trim()}`);
     }
     if (/\bBASH_ENV\b/.test(deq(ln))) v.push(`${file}:${k + 1}: BASH_ENV names a file the shell runs first and could unset the variable`);
     const toks = deq(ln).split(/\s+/);
@@ -494,7 +510,7 @@ topEnvs === files.length ? ok(`all ${files.length} workflows set the workflow-le
 // says; the second look is the DEC-183 review every workflow change gets. No zero-opt-out assertion.
 ok(`${optOutsListed} opt-out(s) listed above`);
 // OMARK-111 item 10: a local composite action's env: and run: live outside wfDir and are never read.
-// A step `uses: ./path` is refused above (readabilityViolations); this is a second tripwire for the
+// A node `uses: ./...` (a job-level workflow file excepted) is refused above (readabilityViolations); this is a second tripwire for the
 // conventional directory. Third-party actions can also core.exportVariable for later steps: a trust
 // class this lint does not and cannot cover (DECLINED BY NAME).
 !existsSync(path.join(wfDir, '..', 'actions')) ? ok('no local composite actions exist under .github/actions (their env: and run: would not be read)') : no('.github/actions exists: a local composite action is not read by this checker');
@@ -708,6 +724,22 @@ const wbad = {
   'BASH_"ENV" with quotes inside the name (N1)': ['BASH_ENV', wf(WENV, JOB('', '      - run: export BASH_"ENV"=x\n'))],
   'an abbreviated --dangerously-allow (N2)': ['allows all scripts', wf(WENV, JOB('', '      - run: npm update --dangerously-allow\n'))],
   'a step running a local action (N4)': ['local action', wf(WENV, JOB('', '      - uses: ./some/action\n'))],
+  // round-4 reviewer (1083683) B1-B5 and N1, N2: each accepted at 1083683, rejected after the fix
+  'an anchor and alias whose name has a dot (B1)': ['anchor or alias', 'env:\n  npm_config_ignore_scripts: "true"\n  X: &k.v npm_config_ignore_scripts\njobs:\n' + JOB('    env:\n      *k.v : "false"\n', NPMSTEP)],
+  'an anchor that follows a tag (B1)': ['anchor or alias', 'env:\n  npm_config_ignore_scripts: "true"\n  X: !!str &kv npm_config_ignore_scripts\njobs:\n' + JOB('', NPMSTEP)],
+  'a YAML tag at a node position (B1)': ['YAML tag', wf(WENV, JOB('', '      - name: !!str x\n        run: echo\n'))],
+  'a plain scalar that starts on the line after its key (B2)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run:\n          npm update --ignore-scripts\n          false\n'))],
+  'a > fold whose header is on its own line (B3)': ['folded block scalar', wf(WENV, JOB('', '      - name: i\n        run:\n          >-\n            npm update --ignore-scripts\n            false\n'))],
+  'a nested - - >- fold (B3)': ['folded block scalar', wf(WENV, JOB('', '      - - >-\n          npm update --ignore-scripts\n          false\n'))],
+  'a brace group inside the variable name (B4a)': ['structural shell form', wf(WENV, JOB('', '      - run: export npm_conf{ig,}_ignore_scripts=false\n'))],
+  '$\'..\' inside the variable name (B4a)': ['structural shell form', wf(WENV, JOB('', "      - run: export npm_conf$'ig'_ignore_scripts=false\n"))],
+  'a brace group that makes the dashes (B4b)': ['structural shell form', wf(WENV, JOB('', '      - run: npm update {x,-}-no-ignore-scripts\n'))],
+  '$\'..\' in the value word after a bare flag (B5)': ['structural shell form', wf(WENV, JOB('', "      - run: npm ci --ignore-scripts fa$'lse'\n"))],
+  'a brace group as the value word after a bare flag (B5)': ['structural shell form', wf(WENV, JOB('', '      - run: npm update --ignore-scripts {false,true}\n'))],
+  'a brace group split across quoted words (N1)': ['structural shell form', wf(WENV, JOB('', '      - run: npm update --{no-,"x y"}ignore-scripts\n'))],
+  'a STEP running ./.github/workflows/act.yml (N2: the exception is job-level only)': ['local action', wf(WENV, JOB('', '      - uses: ./.github/workflows/act.yml\n'))],
+  'a job-level uses of a composite directory with no .yml suffix (N2)': ['local action', wf(WENV, '  a:\n    uses: ./.github/workflows/act\n')],
+  'a step running ./.github/workflows/act as an action (N2)': ['local action', wf(WENV, JOB('', '      - uses: ./.github/workflows/act\n'))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -747,12 +779,14 @@ for (const [label, t] of [
   ['--inspect and --if-present are not abbreviations of the flag (item 4a accept)', wf(WENV, JOB('', '      - run: npm run build --if-present --inspect\n'))],
   ['a comment ending in a backslash above a harmless line (B1 accept)', wf(WENV, JOB('', '      - run: |\n          # note \\\n          echo hi\n'))],
   ['--ignore-scripts followed by an ordinary package word (B2 accept)', wf(WENV, JOB('', '      - run: npm install -g --ignore-scripts "x@1.2.3"\n'))],
-  ['a brace group outside an option-like or variable-naming token (a2 accept)', wf(WENV, JOB('', '      - run: echo {a,b}\n'))],
   ['an option with a ${VAR} value (a2 accept)', wf(WENV, JOB('', '      - run: npm run build -- --registry=${REG} --prefix="${P:-x,y}"\n'))],
   ['a | body with a backslash and a name with a colon (a2 accept)', wf(WENV, JOB('', '      - name: "step: one"\n        run: |\n          echo a\\\\b\n'))],
   ['a mapping key whose children are indented (a2 accept)', wf(WENV, JOB('    env:\n      A: 1\n', NPMSTEP))],
   ['a local reusable workflow under .github/workflows (N4 accept)', wf(WENV, '  a:\n    uses: ./.github/workflows/x.yml\n')],
   ['an unrelated option and a one-letter option below the 4-character abbreviation floor (N2 accept)', wf(WENV, JOB('', '      - run: npm run build --dry-run --if-present --d\n'))],
+  ['a ${X:-a,b} parameter expansion and a { ...; } group (round-4 accept)', wf(WENV, JOB('', '      - run: |\n          echo "${X:-a,b}"\n          { echo hi; }\n'))],
+  ['a bang inside a quoted scalar and an expression (round-4 accept)', wf(WENV, JOB('', '      - name: "hello!"\n        if: ${{ !cancelled() }}\n        run: echo "done!"\n'))],
+  ['a bare - list item and a | header on its own line (round-4 accept)', wf(WENV, JOB('', '      - name: i\n        run:\n          |\n            echo hi\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -814,5 +848,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 229) { console.log('ran fewer than the 229 expected passing cases'); process.exit(1); }
+if (pass < 246) { console.log('ran fewer than the 246 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
