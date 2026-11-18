@@ -139,7 +139,10 @@ const hasIgnoreScripts = (cmd) => {
     const tok = deq(m[0]);
     if (tok === '--ignore-scripts=true') return true;
     if (tok !== '--ignore-scripts') return false;
-    return !/^\s+["']?(true|false|null|undefined|[0-9]+)["']?(?=[\s)<>`;&|]|$)/i.test(cmd.slice(m.index + m[0].length));
+    // The value word is read the way bash hands it to npm: quotes and backslashes deleted
+    // (`"fa"lse`, `fals\e` are `false`), OMARK-111 round 3 B2.
+    const nxt = cmd.slice(m.index + m[0].length).match(/^\s+(\S+)/);
+    return !(nxt && /^(true|false|null|undefined|[0-9]+)(?:[)<>`;&|].*)?$/i.test(deq(nxt[1])));
   });
 };
 
@@ -261,17 +264,23 @@ export function variableTouches(text) {
   return out;
 }
 
-// Physical lines joined across a trailing backslash, the way bash reads them; `k` is the 0-based
-// first line. Scans below read these, so a name or flag split over a continuation is one token.
+// Lines for the scans, `k` the 0-based first line: EVERY physical line, plus the logical line when
+// a trailing backslash joins it to the next one (the way bash reads it), so a name or flag split over
+// a continuation is one token. Both are scanned, so neither reading can hide a line from the other.
+// A comment line is never extended (bash keeps a trailing backslash in a comment literal, so the
+// next line still runs), and only an ODD run of trailing backslashes is a continuation (`a\\` is a
+// literal backslash). OMARK-111 round 3 B1.
 export function logicalLines(text) {
   const raw = text.split('\n');
-  const out = [];
+  const out = raw.map((t, k) => ({ k, text: t }));
   for (let i = 0; i < raw.length; i++) {
+    const cont = (t) => !/^\s*#/.test(t) && (t.match(/\\*$/)[0].length % 2 === 1);
+    if (!cont(raw[i])) continue;
     let t = raw[i];
     const k = i;
     // The next line's indentation is dropped too: a block scalar's own indent is not part of the
     // text bash reads, and over-joining only makes the scans stricter.
-    while (/\\$/.test(t) && i + 1 < raw.length) t = t.slice(0, -1) + raw[++i].trimStart();
+    while (cont(t) && i + 1 < raw.length) t = t.slice(0, -1) + raw[++i].trimStart();
     out.push({ k, text: t });
   }
   return out;
@@ -612,6 +621,14 @@ const wbad = {
   // item 7: npm 12
   'npm update --dangerously-allow-all-scripts': ['allows all scripts', wf(WENV, JOB('', '      - run: npm update --dangerously-allow-all-scripts\n'))],
   'npm_config_dangerously_allow_all_scripts=true npm update': ['allows all scripts', wf(WENV, JOB('', '      - run: npm_config_dangerously_allow_all_scripts=true npm update\n'))],
+  // OMARK-111 round 3 (opus unit, e5400c0) B1: a comment or a literal backslash ending a line
+  'a comment ending in a backslash above an exported override (B1)': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: |\n          # note \\\n          export npm_config_ignore_scripts=false\n          npm update\n'))],
+  'a comment ending in a backslash above an override flag (B1)': ['override flag', wf(WENV, JOB('', '      - run: |\n          # note \\\n          npm update --no-ignore-scripts\n'))],
+  'an escaped backslash at line end gluing env -i to the previous word (B1)': ['clears the environment', wf(WENV, JOB('', '      - run: |\n          echo a\\\\\n          env -i npm update\n'))],
+  // B2: the value word after a bare flag, read with quotes and backslashes deleted
+  'npm update --ignore-scripts "fa"lse (B2)': ['override flag', wf(WENV, JOB('', '      - run: npm update --ignore-scripts "fa"lse\n'))],
+  'npm update --ignore-scripts fals\\e (B2)': ['override flag', wf(WENV, JOB('', '      - run: npm update --ignore-scripts fals\\e\n'))],
+  'npm ci --ignore-scripts "fa"lse (B2, the NPM_CMD backstop)': ['without --ignore-scripts', wf(WENV, JOB('', '      - run: npm ci --ignore-scripts "fa"lse\n'))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -649,6 +666,8 @@ for (const [label, t] of [
   ['env with an assignment and --ignore-scripts (item 6 accept)', wf(WENV, JOB('', '      - run: env FOO=1 npm ci --ignore-scripts\n'))],
   ['--ignore-"scripts" with quotes inside, still the bare flag (item 4b accept)', wf(WENV, JOB('', '      - run: npm update --ignore-"scripts"\n'))],
   ['--inspect and --if-present are not abbreviations of the flag (item 4a accept)', wf(WENV, JOB('', '      - run: npm run build --if-present --inspect\n'))],
+  ['a comment ending in a backslash above a harmless line (B1 accept)', wf(WENV, JOB('', '      - run: |\n          # note \\\n          echo hi\n'))],
+  ['--ignore-scripts followed by an ordinary package word (B2 accept)', wf(WENV, JOB('', '      - run: npm install -g --ignore-scripts "x@1.2.3"\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -710,5 +729,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 190) { console.log('ran fewer than the 190 expected passing cases'); process.exit(1); }
+if (pass < 198) { console.log('ran fewer than the 198 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
