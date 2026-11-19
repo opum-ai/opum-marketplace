@@ -188,7 +188,10 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // backslash outside bodies; no multi-line quoted scalars; no anchors, aliases or tags at a NODE start
 // (the content start, the value start after `key: `, and each entry start inside a flow `{}` or `[]`
 // collection; names are any non-space characters; a `&&`, `!cancelled()` or `*.md` inside a plain scalar
-// is not a node start); no ? keys (any number of dashes); no expression keys; env: only as a block
+// is not a node start); the line-shape allowlist: outside bodies every line is a block header, a key line with a
+// strict key ([\w.\/@-]+ or a simple quoted key) and a value, or, as a `- ` item only, one complete quoted scalar
+// or a plain scalar without `: ` (a key the reader cannot split is refused whatever its comment); no ? keys (any
+// number of dashes); no expression keys; env: only as a block
 // mapping; no `uses: ./...` except a job-level `uses: ./.github/workflows/<file>.yml` (read, because it
 // lives in wfDir); a `---` only as the first significant line, no `...`. Shell side, (a2) Q2 A named only
 // the structural forms in option-like or variable-naming tokens plus the de-quoted value word after
@@ -356,22 +359,28 @@ export function readabilityViolations(file, text) {
     // one exception is a job-level `uses:` of a workflow file (read, because it lives in wfDir).
     if (/^\s*(?:-\s+)?["']?uses["']?\s*:\s*["']?\.\//.test(l) && !(/^ {4}uses/.test(l) && /uses["']?\s*:\s*["']?\.\/\.github\/workflows\/[^/\s]+\.ya?ml["']?\s*(?:#.*)?$/.test(l))) v.push(`${file}:${i + 1}: a local action (uses: ./...) is not read by this checker; its env: and run: are never opened`);
     {
-      // Single-line scalars elsewhere: a quoted scalar must close on its own line, and a plain or
-      // quoted scalar may not continue on a more-indented line below.
+      // THE LAYOUT ALLOWLIST (rounds 7-9). Outside | bodies every line is exactly one of: a block header,
+      // a KEY LINE with a strict key (`[\w.\/@-]+`, or a simple quoted key of the same characters and spaces)
+      // and a value, or, as a `- ` item only, one complete quoted scalar or a plain scalar without `: `.
+      // Everything else is refused, so a key this reader cannot split (`:k`, `'it''s #'`, `*k`) never has a
+      // value it fails to read, however the line ends (a trailing comment cannot exempt it). Dashes,
+      // flow collections and node properties are then read for what they are.
+      const KEY = /^(?:[\w.\/@-]+|"[\w .\/@-]*"|'[\w .\/@-]*')\s*:(?:\s+(.*?))?\s*$/;
       const sm = l.match(/^(\s*)((?:-\s+)*)(.*)$/);
       const content = sm[3];
-      const kv = content.match(/^(?:"[^"]*"|'[^']*'|[^\s"'#:](?:(?!\s#)(?:[^:]|:(?!\s)))*?)\s*:\s+(\S.*)$/);
-      const value = (kv ? kv[1] : (/:\s*(?:#.*)?$/.test(content) || content === '' ? '' : content));
-      // An anchor, alias or tag at a NODE position: the start of the content (after any `- ` items; this
-      // is also the key node), the start of the value after `key: `, and, when a node is a flow collection
-      // (`{...}` or `[...]`), the start of each entry (after `{`, `[`, `,`, `: ` and `? `). A chain of
-      // `!tag` / `&anchor` properties is followed first. A `&&`, `!cancelled()` or `*.md` inside a plain
-      // scalar is not a node start. Names are ANY non-space characters, not just [\w-]. `${{ }}`
-      // expressions are masked first so their braces are not read as a flow mapping.
+      const km = content.match(KEY);
+      const isKey = km !== null;
+      const value = isKey ? (km[1] ?? '') : content;
+      // An anchor, alias or tag at a NODE position: the start of the content (after any `- ` items), the
+      // value after `key: `, and, when a node is a flow collection (`{...}` or `[...]`), the start of each
+      // entry (after `{`, `[`, `,`, a colon with or without a space, and `? `). A chain of `!tag` /
+      // `&anchor` properties is followed first. A `&&`, `!cancelled()` or `*.md` inside a plain scalar is
+      // not a node start. Names are ANY non-space characters. `${{ }}` expressions are masked first so
+      // their braces are not read as a flow mapping.
       {
         const lx = l.replace(/\$\{\{.*?\}\}/g, 'X');
         const cx = lx.match(/^(\s*)((?:-\s+)*)(.*)$/)[3];
-        const kx = cx.match(/^(?:"[^"]*"|'[^']*'|[^\s"'#:](?:(?!\s#)(?:[^:]|:(?!\s)))*?)\s*:\s+(\S.*)$/);
+        const kx = cx.match(KEY);
         const props = (str) => {
           let n = str, tag = false, anchor = false;
           for (;;) {
@@ -383,7 +392,7 @@ export function readabilityViolations(file, text) {
           return { n, tag: tag || /^!/.test(n), anchor: anchor || /^[&*]\S/.test(n) };
         };
         let sawTag = false, sawAnchor = false;
-        for (const node of kx ? [cx, kx[1]] : [cx]) {
+        for (const node of kx ? [cx, kx[1] ?? ''] : [cx]) {
           const r = props(node);
           sawTag = sawTag || r.tag; sawAnchor = sawAnchor || r.anchor;
           if (/^[{[]/.test(r.n)) {
@@ -396,18 +405,14 @@ export function readabilityViolations(file, text) {
         if (sawTag) v.push(`${file}:${i + 1}: a YAML tag (!x) at a node position is not read by this checker; write the value plainly`);
         if (sawAnchor) v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x) is not read by this checker; write the value out`);
       }
-      // Outside | bodies every line is a key line, a `- ` item or a block header: anything else is the
-      // start or the continuation of a plain scalar placed on its own line.
-      if (sm[2] === '' && content !== '' && !kv && !/:\s*(?:#.*)?$/.test(content) && !BLOCK_HEADER.test(l)) {
-        v.push(`${file}:${i + 1}: a line that is not a key line, a - item or a block header (a plain scalar on its own line) is not read by this checker`);
-      }
-      // CLASS RULE (round 7): a `- ` item must be a key line (it split into key and value), one complete
-      // quoted scalar, or a plain scalar, and a plain scalar cannot contain `: `. Anything else (a key
-      // the pattern above cannot split, such as `:a: *x`, or `'a''b': *x`) is refused whatever its spelling.
-      if (sm[2] !== '' && content !== '' && !kv && !BLOCK_HEADER.test(l)) {
-        const complete = /^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(content) || /^'(?:[^']|'')*'\s*(?:#.*)?$/.test(content);
-        if (!complete && /:\s/.test(content.replace(/(^|\s)#.*$/, ''))) {
-          v.push(`${file}:${i + 1}: a - item that is neither a key line nor one complete quoted scalar and still contains ": " is not read by this checker (a plain scalar cannot contain ": "); write a plain key`);
+      if (content !== '' && !isKey && !BLOCK_HEADER.test(l)) {
+        if (sm[2] === '') {
+          v.push(`${file}:${i + 1}: a line that is not a key line, a - item or a block header (a plain scalar on its own line, or a key this checker cannot split) is not read by this checker`);
+        } else {
+          const complete = /^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(content) || /^'(?:[^']|'')*'\s*(?:#.*)?$/.test(content);
+          if (!complete && /:(?:\s|$)/.test(content)) {
+            v.push(`${file}:${i + 1}: a - item that is neither a key line nor one complete quoted scalar and still contains ": " is not read by this checker (a plain scalar cannot contain ": "); write a plain key`);
+          }
         }
       }
       const vv = value.replace(/(^|\s)#.*$/, '').trim();
@@ -415,7 +420,7 @@ export function readabilityViolations(file, text) {
         if ((vv.startsWith('"') && !/^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(value.trim())) || (vv.startsWith("'") && !/^'(?:[^']|'')*'\s*(?:#.*)?$/.test(value.trim()))) {
           v.push(`${file}:${i + 1}: a multi-line quoted scalar is not read by this checker; keep a quoted scalar on one line`);
         }
-        const keyCol = sm[1].length + (kv ? sm[2].length : 0);
+        const keyCol = sm[1].length + (isKey ? sm[2].length : 0);
         const nx = lines.slice(i + 1).find((x) => x.trim() !== '' && !/^\s*#/.test(x));
         if (nx !== undefined && indentOf(nx) > keyCol) v.push(`${file}:${i + 1}: a plain-scalar continuation (a more-indented line under a single-line value) is not read by this checker; keep the value on one line`);
       }
@@ -812,7 +817,7 @@ const wbad = {
   'an alias inside a flow sequence (r6 B1)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        with: [*x]\n        run: echo\n'))],
   'a tag inside a flow sequence after a comma (r6 B1)': ['YAML tag', wf(WENV, JOB('', '      - name: i\n        with: [a, !!str x]\n        run: echo\n'))],
   'an explicit key after two dashes (r6 B1b)': ['explicit key', wf(WENV, JOB('', '      - - ? k\n'))],
-  'an alias value under a key containing a hash (r6 B1c)': ['anchor or alias', wf(WENV, JOB('', '      - a#b: *x.y\n'))],
+  'an alias value under a key containing a hash (r6 B1c; now refused as an unsplittable key)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - a#b: *x.y\n'))],
   // round-6 review N1, N2
   'a --- document start that is not the first significant line (r6 N1)': ['not a key line', wf(WENV, JOB('', NPMSTEP)) + '---\n'],
   'a ... document end line (r6 N1)': ['not a key line', wf(WENV, JOB('', NPMSTEP)) + '...\n'],
@@ -823,6 +828,12 @@ const wbad = {
   'a - item whose key starts with a colon, anchored value (r7 B1)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - :a: &x.y v\n'))],
   "a - item with a doubled-quote key and an alias value (r7 N5)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'a''b': *x.y\n"))],
   'a flow mapping with no space after the colon (r7 N1)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        with: {"a":*x.y}\n        run: echo\n'))],
+  // round-8 review (1f269f2) B1/B2: a key the reader cannot split plus a trailing comment ending in a colon
+  "a - item with a quoted key holding '' and ' #', an alias value and a comment ending in a colon (r8 B1)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'it''s #': *a.b # see:\n"))],
+  "the same with an anchored value (r8 B1)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'it''s #': &a v # see:\n"))],
+  'a colon-led key without a dash, alias value, comment ending in a colon (r8 B2)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        :k: *a.b # see:\n'))],
+  'a colon-led key without a dash, anchored value (r8 B2)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        :k: &a v # see:\n'))],
+  "a doubled-quote key without a dash, alias value, comment ending in a colon (r8 B2)": ['not a key line', wf(WENV, JOB('', "      - name: i\n        run: echo\n        'it''s': *a.b # see:\n"))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -881,6 +892,8 @@ for (const [label, t] of [
   ['a quoted - item containing a colon-space (r7 B1 accept)', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - "echo: hi"\n'))],
   ['a flow mapping with a no-space colon and a URL (r7 N1 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a:b}\n        run: echo\n      - name: j\n        with: {url: https://x.y/z}\n        run: echo\n'))],
   ['a masked expression inside a flow mapping (r7 N3 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: "${{ !cancelled() }}"}\n        run: echo\n'))],
+  ['a - item key line with trailing whitespace and a mapping below (r8 N1 accept)', wf(WENV, JOB('', '      - env: \n          V: 1\n        run: echo\n'))],
+  ['a simple quoted key with spaces (r8 accept)', wf(WENV, JOB('', '      - name: i\n        with:\n          "a b": c\n        run: echo\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -942,5 +955,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 281) { console.log('ran fewer than the 281 expected passing cases'); process.exit(1); }
+if (pass < 288) { console.log('ran fewer than the 288 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
