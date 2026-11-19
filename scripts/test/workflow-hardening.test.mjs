@@ -387,7 +387,7 @@ export function readabilityViolations(file, text) {
           const r = props(node);
           sawTag = sawTag || r.tag; sawAnchor = sawAnchor || r.anchor;
           if (/^[{[]/.test(r.n)) {
-            for (const m of r.n.matchAll(/[{[,]\s*|:\s+|\?\s+/g)) {
+            for (const m of r.n.matchAll(/[{[,]\s*|:\s*|\?\s+/g)) {
               const e = props(r.n.slice(m.index + m[0].length));
               sawTag = sawTag || e.tag; sawAnchor = sawAnchor || e.anchor;
             }
@@ -400,6 +400,15 @@ export function readabilityViolations(file, text) {
       // start or the continuation of a plain scalar placed on its own line.
       if (sm[2] === '' && content !== '' && !kv && !/:\s*(?:#.*)?$/.test(content) && !BLOCK_HEADER.test(l)) {
         v.push(`${file}:${i + 1}: a line that is not a key line, a - item or a block header (a plain scalar on its own line) is not read by this checker`);
+      }
+      // CLASS RULE (round 7): a `- ` item must be a key line (it split into key and value), one complete
+      // quoted scalar, or a plain scalar, and a plain scalar cannot contain `: `. Anything else (a key
+      // the pattern above cannot split, such as `:a: *x`, or `'a''b': *x`) is refused whatever its spelling.
+      if (sm[2] !== '' && content !== '' && !kv && !BLOCK_HEADER.test(l)) {
+        const complete = /^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(content) || /^'(?:[^']|'')*'\s*(?:#.*)?$/.test(content);
+        if (!complete && /:\s/.test(content.replace(/(^|\s)#.*$/, ''))) {
+          v.push(`${file}:${i + 1}: a - item that is neither a key line nor one complete quoted scalar and still contains ": " is not read by this checker (a plain scalar cannot contain ": "); write a plain key`);
+        }
       }
       const vv = value.replace(/(^|\s)#.*$/, '').trim();
       if (vv !== '' && !/^[|>{[]/.test(vv)) {
@@ -808,6 +817,12 @@ const wbad = {
   'a --- document start that is not the first significant line (r6 N1)': ['not a key line', wf(WENV, JOB('', NPMSTEP)) + '---\n'],
   'a ... document end line (r6 N1)': ['not a key line', wf(WENV, JOB('', NPMSTEP)) + '...\n'],
   'a job-level uses of a workflow in a subdirectory (r6 N2)': ['local action', wf(WENV, '  a:\n    uses: ./.github/workflows/sub/x.yml\n')],
+  // round-7 review (2b61a28): the class rule for a - item, placed LAST in steps (a more-indented next line would
+  // trigger the continuation rule and hide the gap)
+  'a - item whose key starts with a colon, alias value (r7 B1)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - :a: *x.y\n'))],
+  'a - item whose key starts with a colon, anchored value (r7 B1)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - :a: &x.y v\n'))],
+  "a - item with a doubled-quote key and an alias value (r7 N5)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'a''b': *x.y\n"))],
+  'a flow mapping with no space after the colon (r7 N1)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        with: {"a":*x.y}\n        run: echo\n'))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -863,6 +878,9 @@ for (const [label, t] of [
   ['a YAML document start marker (r5 N7 accept)', '---\n' + wf(WENV, JOB('', NPMSTEP))],
   ['the real branches: [dev, main] flow sequence (r6 B1 accept)', 'on:\n  push:\n    branches: [dev, main]\n' + wf(WENV, JOB('', NPMSTEP))],
   ['a single-entry flow mapping with a plain value (r6 B1 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: b}\n        run: echo\n'))],
+  ['a quoted - item containing a colon-space (r7 B1 accept)', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - "echo: hi"\n'))],
+  ['a flow mapping with a no-space colon and a URL (r7 N1 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a:b}\n        run: echo\n      - name: j\n        with: {url: https://x.y/z}\n        run: echo\n'))],
+  ['a masked expression inside a flow mapping (r7 N3 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: "${{ !cancelled() }}"}\n        run: echo\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -924,5 +942,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 274) { console.log('ran fewer than the 274 expected passing cases'); process.exit(1); }
+if (pass < 281) { console.log('ran fewer than the 281 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
