@@ -183,15 +183,15 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // STATED CLAIM (DEC-277 (a2), opum-doc, verbatim): "catches plain-text and accidental overrides of the
 // workflow-level protection; not a defence against an adversarial workflow author".
 // CONTRACT (DEC-277 (a2) Q2, A), enforced in readabilityViolations. YAML side, a strict layout allowlist:
-// | bodies only; outside them every line is a key line, a `- ` item or a block header (so no plain
-// scalar on its own line or continued on the next); no > folds (header anywhere, nested too); no
-// backslash outside bodies; no multi-line quoted scalars; no anchors, aliases or tags at a NODE start
-// (the content start, the value start after `key: `, and each entry start inside a flow `{}` or `[]`
-// collection; names are any non-space characters; a `&&`, `!cancelled()` or `*.md` inside a plain scalar
-// is not a node start); the line-shape allowlist: outside bodies every line is a block header, a key line with a
-// strict key ([\w.\/@-]+ or a simple quoted key) and a value, or, as a `- ` item only, one complete quoted scalar
-// or a plain scalar without `: ` (a key the reader cannot split is refused whatever its comment); no ? keys (any
-// number of dashes); no expression keys; env: only as a block
+// | bodies only, and NOTHING outside a | body spans lines: no plain-scalar or quoted-scalar continuation, no
+// multi-line flow collection (a `{` or `[` value must close on its own line, ignoring quoted text), no > fold
+// (header anywhere, nested too), no backslash outside bodies. The line-shape allowlist: outside bodies every
+// line is a block header, a key line with a strict key ([\w.\/@-]+ or a simple quoted key) and a value, or,
+// as a `- ` item only, one complete quoted scalar or a plain scalar without `: ` (a key the reader cannot split
+// is refused whatever its comment). No anchors, aliases or tags at a NODE start (the content start, the value
+// start after `key: `, and each entry start inside a single-line flow `{}` or `[]` collection; names are any
+// non-space characters; a `&&`, `!cancelled()` or `*.md` inside a plain scalar is not a node start); no ? keys
+// (any number of dashes); no expression keys; env: only as a block
 // mapping; no `uses: ./...` except a job-level `uses: ./.github/workflows/<file>.yml` (read, because it
 // lives in wfDir); a `---` only as the first significant line, no `...`. Shell side, (a2) Q2 A named only
 // the structural forms in option-like or variable-naming tokens plus the de-quoted value word after
@@ -411,14 +411,22 @@ export function readabilityViolations(file, text) {
         } else {
           const complete = /^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(content) || /^'(?:[^']|'')*'\s*(?:#.*)?$/.test(content);
           if (!complete && /:(?:\s|$)/.test(content)) {
-            v.push(`${file}:${i + 1}: a - item that is neither a key line nor one complete quoted scalar and still contains ": " is not read by this checker (a plain scalar cannot contain ": "); write a plain key`);
+            v.push(`${file}:${i + 1}: a - item that is neither a key line nor one complete quoted scalar and still contains ": " or ends with a colon is not read by this checker (a plain scalar cannot contain ": "); write a plain key`);
           }
         }
       }
       const vv = value.replace(/(^|\s)#.*$/, '').trim();
+      // NOTHING outside a | body spans lines (the premise of the line-shape allowlist): a flow collection must
+      // close on its own line, counting only brackets outside quoted text and ${{ }} expressions.
+      if (/^[{[]/.test(vv)) {
+        const flat = vv.replace(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'/g, '').replace(/\$\{\{.*?\}\}/g, '');
+        if ((flat.match(/[{[]/g) ?? []).length !== (flat.match(/[}\]]/g) ?? []).length) {
+          v.push(`${file}:${i + 1}: a multi-line flow collection (a { or [ value that does not close on its own line) is not read by this checker; keep it on one line`);
+        }
+      }
       if (vv !== '' && !/^[|>{[]/.test(vv)) {
         if ((vv.startsWith('"') && !/^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(value.trim())) || (vv.startsWith("'") && !/^'(?:[^']|'')*'\s*(?:#.*)?$/.test(value.trim()))) {
-          v.push(`${file}:${i + 1}: a multi-line quoted scalar is not read by this checker; keep a quoted scalar on one line`);
+          v.push(`${file}:${i + 1}: a multi-line quoted scalar (or a quoted scalar followed by other text) is not read by this checker; keep a quoted scalar on one line`);
         }
         const keyCol = sm[1].length + (isKey ? sm[2].length : 0);
         const nx = lines.slice(i + 1).find((x) => x.trim() !== '' && !/^\s*#/.test(x));
@@ -834,6 +842,15 @@ const wbad = {
   'a colon-led key without a dash, alias value, comment ending in a colon (r8 B2)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        :k: *a.b # see:\n'))],
   'a colon-led key without a dash, anchored value (r8 B2)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        :k: &a v # see:\n'))],
   "a doubled-quote key without a dash, alias value, comment ending in a colon (r8 B2)": ['not a key line', wf(WENV, JOB('', "      - name: i\n        run: echo\n        'it''s': *a.b # see:\n"))],
+  // round-9 review (bd3097e) B1: a flow collection must close on its own line
+  'a multi-line flow mapping hiding an alias on the continuation line (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: *x}\n        run: echo\n'))],
+  'a multi-line flow mapping hiding an anchor (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: &x v}\n        run: echo\n'))],
+  'a multi-line flow mapping hiding a tag (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: !!str x}\n        run: echo\n'))],
+  'a multi-line flow sequence hiding an alias (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: [a,\n          b: c, *x]\n        run: echo\n'))],
+  'a multi-line flow mapping continued at the key indent (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n        c: *x}\n        run: echo\n'))],
+  // round-9 N3: pinned, with its (now accurate) message
+  'a quoted - item key with no space after the colon (r9 N3)': ['multi-line quoted scalar (or a quoted scalar followed by other text)', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - "a":*x\n'))],
+  'a quoted key with no space after the colon, no dash (r9 N3)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        "a":*x\n'))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -894,6 +911,8 @@ for (const [label, t] of [
   ['a masked expression inside a flow mapping (r7 N3 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: "${{ !cancelled() }}"}\n        run: echo\n'))],
   ['a - item key line with trailing whitespace and a mapping below (r8 N1 accept)', wf(WENV, JOB('', '      - env: \n          V: 1\n        run: echo\n'))],
   ['a simple quoted key with spaces (r8 accept)', wf(WENV, JOB('', '      - name: i\n        with:\n          "a b": c\n        run: echo\n'))],
+  ['a flow mapping whose quoted value holds a brace (r9 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: "}"}\n        run: echo\n'))],
+  ['a single-line flow sequence with an expression (r9 accept)', wf(WENV, JOB('', '      - name: i\n        with: [a, "${{ github.ref }}"]\n        run: echo\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -955,5 +974,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 288) { console.log('ran fewer than the 288 expected passing cases'); process.exit(1); }
+if (pass < 297) { console.log('ran fewer than the 297 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
