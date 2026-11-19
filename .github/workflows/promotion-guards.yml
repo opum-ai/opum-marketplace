@@ -21,9 +21,11 @@ name: promotion guards
 
 on:
   pull_request:
-    branches: [main]
+    branches:
+      - main
   push:
-    branches: [main]
+    branches:
+      - main
 
 # OMARK-101: bound the checkout's token to reading contents. This workflow had no
 # permissions block, so it ran with the repository default. ci.yml declares the same.
@@ -46,7 +48,7 @@ jobs:
     # gate reads REQUIRED checks on the SHA, so this job's failure does not
     # block the fast-forward push it exists to steer people toward.
     name: dev-to-main promotion is a manual fast-forward push
-    if: github.event_name == 'pull_request'
+    if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - name: do not merge this PR with the button
@@ -76,7 +78,7 @@ jobs:
     # Kept separate on purpose: adding 1 as a REPLACEMENT for 2 would have
     # traded a known blind spot for a new one while looking like a fix.
     name: main landed via fast-forward from dev
-    if: github.event_name == 'push'
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       # fetch-depth: 0 is load-bearing twice over: the shallow default has

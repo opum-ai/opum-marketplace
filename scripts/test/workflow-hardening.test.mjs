@@ -184,12 +184,12 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // workflow-level protection; not a defence against an adversarial workflow author".
 // CONTRACT (DEC-277 (a2) Q2, A), enforced in readabilityViolations. YAML side, a strict layout allowlist:
 // | bodies only, and NOTHING outside a | body spans lines: no plain-scalar or quoted-scalar continuation, no
-// multi-line flow collection (a `{` or `[` value must close on its own line, ignoring quoted text), no > fold
+// flow collection at all (DEC-277 (a4): every `{` or `[` outside `${{ }}` is refused), no > fold
 // (header anywhere, nested too), no backslash outside bodies. The line-shape allowlist: outside bodies every
 // line is a block header, a key line with a strict key ([\w.\/@-]+ or a simple quoted key) and a value, or,
 // as a `- ` item only, one complete quoted scalar or a plain scalar without `: ` (a key the reader cannot split
 // is refused whatever its comment). No anchors, aliases or tags at a NODE start (the content start, the value
-// start after `key: `, and each entry start inside a single-line flow `{}` or `[]` collection; names are any
+// start after `key: `; names are any
 // non-space characters; a `&&`, `!cancelled()` or `*.md` inside a plain scalar is not a node start); no ? keys
 // (any number of dashes); no expression keys; env: only as a block
 // mapping; no `uses: ./...` except a job-level `uses: ./.github/workflows/<file>.yml` (read, because it
@@ -197,6 +197,14 @@ export const isWorkflowFile = (f) => /\.ya?ml$/.test(f);
 // the structural forms in option-like or variable-naming tokens plus the de-quoted value word after
 // --ignore-scripts (refused when it holds a $' / $" / brace form). Cheap extras kept: env -i, env -,
 // BASH_ENV, npm 12's allow-all flag.
+// DEC-277 (a4) (opum-doc, ODOC-624; 2026-11-19) makes the YAML side LINE-LOCAL BY CONSTRUCTION, after rounds 6-10 each
+// found another spelling past a regex that tried to follow flow collections and quotes across lines: outside a |
+// body, (1) every `{` and `[` outside `${{ }}` is refused, (2) a quote is allowed only as a whole single-line scalar
+// value (or one whole quoted key), (3) keyless nested dashes (`- - |`) are refused. ci.yml and promotion-guards.yml
+// carry block lists and `${{ }}` conditions, and quoted shell lives in | bodies, for that reason. A YAML parser was
+// not chosen (a dependency, DEC-182 (1)). STATED LIMIT, DEC-277 (a4) HARD STOP: round 11 is the last review round for
+// this lint; an anchor, alias or tag spelling it still misses, with no end-to-end override of the ignore-scripts
+// protection, is a recorded limit and not a reason for another round. Only an end-to-end override blocks.
 // DEC-277 (a3) (opum-doc, ODOC-615) amends (a2) Q2's shell side: brace groups (comma or ..) and $' / $" are
 // refused at EVERY position of every non-comment line, bodies and heredocs included. The breadth is
 // deliberate and tested: grep '^x$', awk '{print $1, $2}', jq '{name, version}', a destructuring
@@ -395,12 +403,6 @@ export function readabilityViolations(file, text) {
         for (const node of kx ? [cx, kx[1] ?? ''] : [cx]) {
           const r = props(node);
           sawTag = sawTag || r.tag; sawAnchor = sawAnchor || r.anchor;
-          if (/^[{[]/.test(r.n)) {
-            for (const m of r.n.matchAll(/[{[,]\s*|:\s*|\?\s+/g)) {
-              const e = props(r.n.slice(m.index + m[0].length));
-              sawTag = sawTag || e.tag; sawAnchor = sawAnchor || e.anchor;
-            }
-          }
         }
         if (sawTag) v.push(`${file}:${i + 1}: a YAML tag (!x) at a node position is not read by this checker; write the value plainly`);
         if (sawAnchor) v.push(`${file}:${i + 1}: a YAML anchor or alias (&x, *x) is not read by this checker; write the value out`);
@@ -416,14 +418,19 @@ export function readabilityViolations(file, text) {
         }
       }
       const vv = value.replace(/(^|\s)#.*$/, '').trim();
-      // NOTHING outside a | body spans lines (the premise of the line-shape allowlist): a flow collection must
-      // close on its own line, counting only brackets outside quoted text and ${{ }} expressions.
-      if (/^[{[]/.test(vv)) {
-        const flat = vv.replace(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'/g, '').replace(/\$\{\{.*?\}\}/g, '');
-        if ((flat.match(/[{[]/g) ?? []).length !== (flat.match(/[}\]]/g) ?? []).length) {
-          v.push(`${file}:${i + 1}: a multi-line flow collection (a { or [ value that does not close on its own line) is not read by this checker; keep it on one line`);
-        }
+      // DEC-277 (a4): the grammar is LINE-LOCAL BY CONSTRUCTION. Outside a | body, (1) a flow collection ({ or [)
+      // is refused outright, outside ${{ }} (so nothing in it can span lines or hide an anchor, alias or tag);
+      // (2) a quote character is refused unless the whole value is ONE complete single-line quoted scalar;
+      // (3) keyless nested dashes (`- - |`) are refused, so a block-scalar header never has a body column this
+      // reader reads differently from YAML. Nothing outside a | body then spans lines.
+      const vt = value.trim();
+      const whole = /^"(?:[^"\\]|\\.)*"(?:\s+#.*)?$/.test(vt) || /^'(?:[^']|'')*'(?:\s+#.*)?$/.test(vt);
+      if (!whole) {
+        const plain = value.replace(/\$\{\{.*?\}\}/g, 'X').replace(/(^|\s)#.*$/, '');
+        if (/[{[]/.test(plain)) v.push(`${file}:${i + 1}: a flow collection ({ or [) outside \${{ }} is not read by this checker (DEC-277 a4); write block style`);
+        if (!/^["']/.test(vt) && /["']/.test(plain)) v.push(`${file}:${i + 1}: a quote that is not a whole single-line scalar value is not read by this checker (DEC-277 a4); write the value plainly or quote all of it`);
       }
+      if (/^(?:-\s+){2,}/.test(sm[2])) v.push(`${file}:${i + 1}: a keyless nested dash (- - x) is not read by this checker (DEC-277 a4); write the inner node on its own indented line`);
       if (vv !== '' && !/^[|>{[]/.test(vv)) {
         if ((vv.startsWith('"') && !/^"(?:[^"\\]|\\.)*"\s*(?:#.*)?$/.test(value.trim())) || (vv.startsWith("'") && !/^'(?:[^']|'')*'\s*(?:#.*)?$/.test(value.trim()))) {
           v.push(`${file}:${i + 1}: a multi-line quoted scalar (or a quoted scalar followed by other text) is not read by this checker; keep a quoted scalar on one line`);
@@ -820,10 +827,10 @@ const wbad = {
   'the opt-out comment above a brace-group line does not suppress it (a3)': ['by DEC-277 (a3); move the text into a script file the step runs', wf(WENV, JOB('', '      # ignore-scripts-opt-out: this job needs scripts\n      - run: echo {a,b}\n'))],
   'the opt-out comment above a $\' line does not suppress it (a3)': ['by DEC-277 (a3); move the text into a script file the step runs', wf(WENV, JOB('', "      # ignore-scripts-opt-out: this job needs scripts\n      - run: echo $'x'\n"))],
   // round-6 review (3f213fa) B1: node starts inside flow collections, multiple dashes, a # inside a key
-  'an alias inside a single-entry flow mapping (r6 B1a)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        with: {a: *x}\n        run: echo\n'))],
-  'a tag inside a single-entry flow mapping (r6 B1a)': ['YAML tag', wf(WENV, JOB('', '      - name: i\n        with: {a: !!str x}\n        run: echo\n'))],
-  'an alias inside a flow sequence (r6 B1)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        with: [*x]\n        run: echo\n'))],
-  'a tag inside a flow sequence after a comma (r6 B1)': ['YAML tag', wf(WENV, JOB('', '      - name: i\n        with: [a, !!str x]\n        run: echo\n'))],
+  'an alias inside a single-entry flow mapping (r6 B1a)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: *x}\n        run: echo\n'))],
+  'a tag inside a single-entry flow mapping (r6 B1a)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: !!str x}\n        run: echo\n'))],
+  'an alias inside a flow sequence (r6 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: [*x]\n        run: echo\n'))],
+  'a tag inside a flow sequence after a comma (r6 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: [a, !!str x]\n        run: echo\n'))],
   'an explicit key after two dashes (r6 B1b)': ['explicit key', wf(WENV, JOB('', '      - - ? k\n'))],
   'an alias value under a key containing a hash (r6 B1c; now refused as an unsplittable key)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - a#b: *x.y\n'))],
   // round-6 review N1, N2
@@ -835,7 +842,7 @@ const wbad = {
   'a - item whose key starts with a colon, alias value (r7 B1)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - :a: *x.y\n'))],
   'a - item whose key starts with a colon, anchored value (r7 B1)': ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - :a: &x.y v\n'))],
   "a - item with a doubled-quote key and an alias value (r7 N5)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'a''b': *x.y\n"))],
-  'a flow mapping with no space after the colon (r7 N1)': ['anchor or alias', wf(WENV, JOB('', '      - name: i\n        with: {"a":*x.y}\n        run: echo\n'))],
+  'a flow mapping with no space after the colon (r7 N1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {"a":*x.y}\n        run: echo\n'))],
   // round-8 review (1f269f2) B1/B2: a key the reader cannot split plus a trailing comment ending in a colon
   "a - item with a quoted key holding '' and ' #', an alias value and a comment ending in a colon (r8 B1)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'it''s #': *a.b # see:\n"))],
   "the same with an anchored value (r8 B1)": ['neither a key line nor one complete quoted scalar', wf(WENV, JOB('', "      - name: i\n        run: echo\n      - 'it''s #': &a v # see:\n"))],
@@ -843,14 +850,41 @@ const wbad = {
   'a colon-led key without a dash, anchored value (r8 B2)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        :k: &a v # see:\n'))],
   "a doubled-quote key without a dash, alias value, comment ending in a colon (r8 B2)": ['not a key line', wf(WENV, JOB('', "      - name: i\n        run: echo\n        'it''s': *a.b # see:\n"))],
   // round-9 review (bd3097e) B1: a flow collection must close on its own line
-  'a multi-line flow mapping hiding an alias on the continuation line (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: *x}\n        run: echo\n'))],
-  'a multi-line flow mapping hiding an anchor (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: &x v}\n        run: echo\n'))],
-  'a multi-line flow mapping hiding a tag (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: !!str x}\n        run: echo\n'))],
-  'a multi-line flow sequence hiding an alias (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: [a,\n          b: c, *x]\n        run: echo\n'))],
-  'a multi-line flow mapping continued at the key indent (r9 B1)': ['multi-line flow collection', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n        c: *x}\n        run: echo\n'))],
+  'a multi-line flow mapping hiding an alias on the continuation line (r9 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: *x}\n        run: echo\n'))],
+  'a multi-line flow mapping hiding an anchor (r9 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: &x v}\n        run: echo\n'))],
+  'a multi-line flow mapping hiding a tag (r9 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n          c: d, e: !!str x}\n        run: echo\n'))],
+  'a multi-line flow sequence hiding an alias (r9 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: [a,\n          b: c, *x]\n        run: echo\n'))],
+  'a multi-line flow mapping continued at the key indent (r9 B1)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: b,\n        c: *x}\n        run: echo\n'))],
   // round-9 N3: pinned, with its (now accurate) message
   'a quoted - item key with no space after the colon (r9 N3)': ['multi-line quoted scalar (or a quoted scalar followed by other text)', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - "a":*x\n'))],
   'a quoted key with no space after the colon, no dash (r9 N3)': ['not a key line', wf(WENV, JOB('', '      - name: i\n        run: echo\n        "a":*x\n'))],
+  // DEC-277 (a4), round 11: the grammar is line-local by construction. Each exhibit below is from round 10 (B1, B2)
+  // or is the refusal's own minimal form. Needles are the refusal's own wording (a flow collection, a quote that is not
+  // a whole scalar, a keyless nested dash), so a rejection by another rule cannot satisfy the case.
+  'a single-line flow mapping, plain (a4 flow rule)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: b}\n        run: echo\n'))],
+  'a single-line flow sequence (a4 flow rule, the old branches: [dev, main])': ['a flow collection ({ or [) outside', 'on:\n  push:\n    branches: [dev, main]\n' + wf(WENV, JOB('', NPMSTEP))],
+  'a flow sequence as a - item (a4 flow rule)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - [a, b]\n'))],
+  'a flow mapping holding a quoted brace (a4 flow rule)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {a: "}"}\n        run: echo\n'))],
+  'a bracket inside a plain scalar (a4 flow rule is every [ or { outside an expression)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: check [x]\n        run: echo\n'))],
+  'a plain scalar with a bracket AFTER a masked expression (a4: the mask removes only the expression)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: ${{ github.ref }} [x]\n        run: echo\n'))],
+  'an unterminated expression leaves its brace (a4)': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: ${{ github.ref\n        run: echo\n'))],
+  // round-10 B1: the old closure count deleted quoted spans, so a mis-paired apostrophe or an unterminated quote
+  // left a balanced remainder while the real flow collection continued on the next line. Each form below was
+  // measured CLEAN (zero violations) on bee040a and is refused now because every { or [ is.
+  "r10 B1a: an apostrophe word then a single quote that pairs with it, so the count sees [it] and the alias hides on the next line": ['a flow collection ({ or [) outside', wf(WENV, JOB('', "      - name: i\n        with: [it's a, '],\n          b: x, e: *x.y\n        run: echo\n"))],
+  'r10 B1b: an unterminated entry-start double quote in a flow sequence, an alias on the next line': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: [x, "a]\n          b: x, e: *x.y\n        run: echo\n'))],
+  'r10 B1b: an unterminated entry-start single quote in a flow sequence, an anchor on the next line': ['a flow collection ({ or [) outside', wf(WENV, JOB('', "      - name: i\n        with: [x, 'a]\n          b: x, e: &x.y v\n        run: echo\n"))],
+  'r10 B1b: the mapping form, an unterminated double quote in a flow mapping': ['a flow collection ({ or [) outside', wf(WENV, JOB('', '      - name: i\n        with: {x: "a}\n          b: x, e: *x.y\n        run: echo\n'))],
+  // quotes: a quote is allowed only as a whole single-line scalar value
+  'a quote in the middle of a plain value (a4 quote rule)': ['a quote that is not a whole single-line scalar value', wf(WENV, JOB('', "      - name: it's here\n        run: echo\n"))],
+  'a quoted word followed by plain text (a4 quote rule)': ['a quote that is not a whole single-line scalar value', wf(WENV, JOB('', '      - name: x "a" y\n        run: echo\n'))],
+  'a double quote at the end of a plain value (a4 quote rule)': ['a quote that is not a whole single-line scalar value', wf(WENV, JOB('', '      - name: x 5"\n        run: echo\n'))],
+  'a quote in a single-line run: value that is not a whole scalar (a4: use a | body)': ['a quote that is not a whole single-line scalar value', wf(WENV, JOB('', '      - run: echo "x"\n'))],
+  // round-10 B2: a keyless nested-dash block scalar followed by a sibling dash line in the old body column
+  'r10 B2: a - - | block scalar followed by a sibling dash line carrying an alias': ['a keyless nested dash', wf(WENV, JOB('', '      - - |\n          echo hi\n        - *x.y\n'))],
+  'r10 B2: a - - | block scalar followed by a sibling dash line carrying an anchor': ['a keyless nested dash', wf(WENV, JOB('', '      - - |\n          echo hi\n        - &x.y v\n'))],
+  'a properly indented - - | body is refused too (a4: keyless nested dashes are refused outright)': ['a keyless nested dash', wf(WENV, JOB('', '      - - |\n            echo hi\n'))],
+  'a - - key line (a4)': ['a keyless nested dash', wf(WENV, JOB('', '      - - name: x\n'))],
   // item 3: the whole run text
   'inline npm_config_ignore_scripts=false before npm update': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=false npm update\n'))],
   'export npm_config_ignore_scripts=false': ['touches npm_config_ignore_scripts', wf(WENV, JOB('', '      - run: export npm_config_ignore_scripts=false\n'))],
@@ -875,44 +909,43 @@ for (const [label, t] of [
   ['an override with the adjacent opt-out comment', wf(WENV, JOB('', ENVSTEP('false', '          ' + OPTC)))],
   ['a plain =true assignment in a run line', wf(WENV, JOB('', '      - run: npm_config_ignore_scripts=true npm ci --ignore-scripts\n'))],
   ['a quoted job key with no override', wf(WENV, JOB('', NPMSTEP, '"quoted"'))],
-  ['a block-style env whose value is an expression (only the env: line itself is refused)', wf(WENV, JOB('', '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: echo "$V"\n'))],
+  ['a block-style env whose value is an expression (only the env: line itself is refused)', wf(WENV, JOB('', '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: |\n          echo "$V"\n'))],
   ['a top-level key after jobs: that is not a job, with no override', wf(WENV, JOB('', NPMSTEP)) + 'on:\n  push:\n    branches:\n      - main\n'],
   ['--ignore-scripts then --ignore-scripts=true on a subcommand NPM_CMD does not list', wf(WENV, JOB('', '      - run: npm update --ignore-scripts --ignore-scripts=true\n'))],
   ['a script path that merely contains ignore-scripts', wf(WENV, JOB('', '      - run: bash scripts/test/install-ignore-scripts.test.sh\n'))],
-  ['a step opening with a block-mapping env (item 1 accept)', wf(WENV, JOB('', '      - env:\n          V: 1\n        run: echo "$V"\n'))],
+  ['a step opening with a block-mapping env (item 1 accept)', wf(WENV, JOB('', '      - env:\n          V: 1\n        run: |\n          echo "$V"\n'))],
   ['an env: with a trailing comment and a mapping below (item 1 accept)', wf(WENV, JOB('    env: # c\n      V: 1\n', NPMSTEP))],
   ['a double-quoted scalar with no backslash (item 2 accept)', wf(WENV, JOB('', '      - name: "i"\n        run: echo hi\n'))],
   ['a backslash and quotes inside a block-scalar body (item 2 accept)', wf(WENV, JOB('', '      - run: |\n          echo "a\\\\b"\n'))],
   ['npm_config_ignore_scripts: "true" with a real comment (item 3 accept)', wf(WENV, JOB('    env:\n      npm_config_ignore_scripts: "true" # same\n', NPMSTEP))],
   ['env -u of another variable (item 6 accept)', wf(WENV, JOB('', '      - run: env -u FOO echo hi\n'))],
   ['env with an assignment and --ignore-scripts (item 6 accept)', wf(WENV, JOB('', '      - run: env FOO=1 npm ci --ignore-scripts\n'))],
-  ['--ignore-"scripts" with quotes inside, still the bare flag (item 4b accept)', wf(WENV, JOB('', '      - run: npm update --ignore-"scripts"\n'))],
+  ['--ignore-"scripts" with quotes inside, still the bare flag (item 4b accept)', wf(WENV, JOB('', '      - run: |\n          npm update --ignore-"scripts"\n'))],
   ['--inspect and --if-present are not abbreviations of the flag (item 4a accept)', wf(WENV, JOB('', '      - run: npm run build --if-present --inspect\n'))],
   ['a comment ending in a backslash above a harmless line (B1 accept)', wf(WENV, JOB('', '      - run: |\n          # note \\\n          echo hi\n'))],
-  ['--ignore-scripts followed by an ordinary package word (B2 accept)', wf(WENV, JOB('', '      - run: npm install -g --ignore-scripts "x@1.2.3"\n'))],
-  ['an option with a ${VAR} value (a2 accept)', wf(WENV, JOB('', '      - run: npm run build -- --registry=${REG} --prefix="${P:-x,y}"\n'))],
+  ['--ignore-scripts followed by an ordinary package word (B2 accept)', wf(WENV, JOB('', '      - run: |\n          npm install -g --ignore-scripts "x@1.2.3"\n'))],
+  ['an option with a ${VAR} value (a2 accept)', wf(WENV, JOB('', '      - run: |\n          npm run build -- --registry=${REG} --prefix="${P:-x,y}"\n'))],
   ['a | body with a backslash and a name with a colon (a2 accept)', wf(WENV, JOB('', '      - name: "step: one"\n        run: |\n          echo a\\\\b\n'))],
   ['a mapping key whose children are indented (a2 accept)', wf(WENV, JOB('    env:\n      A: 1\n', NPMSTEP))],
   ['a local reusable workflow under .github/workflows (N4 accept)', wf(WENV, '  a:\n    uses: ./.github/workflows/x.yml\n')],
   ['an unrelated option and a one-letter option below the 4-character abbreviation floor (N2 accept)', wf(WENV, JOB('', '      - run: npm run build --dry-run --if-present --d\n'))],
   ['a ${X:-a,b} parameter expansion and a { ...; } group (round-4 accept)', wf(WENV, JOB('', '      - run: |\n          echo "${X:-a,b}"\n          { echo hi; }\n'))],
-  ['a bang inside a quoted scalar and an expression (round-4 accept)', wf(WENV, JOB('', '      - name: "hello!"\n        if: ${{ !cancelled() }}\n        run: echo "done!"\n'))],
+  ['a bang inside a quoted scalar and an expression (round-4 accept)', wf(WENV, JOB('', '      - name: "hello!"\n        if: ${{ !cancelled() }}\n        run: |\n          echo "done!"\n'))],
   ['a | header on its own line (round-4 accept)', wf(WENV, JOB('', '      - name: i\n        run:\n          |\n            echo hi\n'))],
-  ['an install with a braced ${V} after the bare flag (r5 B1 accept)', wf(WENV, JOB('', '      - run: npm install -g --ignore-scripts "x@${V}"\n'))],
+  ['an install with a braced ${V} after the bare flag (r5 B1 accept)', wf(WENV, JOB('', '      - run: |\n          npm install -g --ignore-scripts "x@${V}"\n'))],
   ['if: with && and !cancelled() inside an expression (r5 B2 accept)', wf(WENV, JOB('', '      - name: i\n        if: ${{ success() && !cancelled() }}\n        run: echo hi\n'))],
   ['if: ${{ !cancelled() && success() }} (r5 B2 accept)', wf(WENV, JOB('', '      - name: i\n        if: ${{ !cancelled() && success() }}\n        run: echo hi\n'))],
   ['a bare if: always() && !cancelled() (r5 B2 accept)', wf(WENV, JOB('', '      - name: i\n        if: always() && !cancelled()\n        run: echo hi\n'))],
   ['a run: with `-- *.md` after ls (r5 B2 accept)', wf(WENV, JOB('', '      - run: ls -- *.md\n'))],
   ['a YAML document start marker (r5 N7 accept)', '---\n' + wf(WENV, JOB('', NPMSTEP))],
-  ['the real branches: [dev, main] flow sequence (r6 B1 accept)', 'on:\n  push:\n    branches: [dev, main]\n' + wf(WENV, JOB('', NPMSTEP))],
-  ['a single-entry flow mapping with a plain value (r6 B1 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: b}\n        run: echo\n'))],
   ['a quoted - item containing a colon-space (r7 B1 accept)', wf(WENV, JOB('', '      - name: i\n        run: echo\n      - "echo: hi"\n'))],
-  ['a flow mapping with a no-space colon and a URL (r7 N1 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a:b}\n        run: echo\n      - name: j\n        with: {url: https://x.y/z}\n        run: echo\n'))],
-  ['a masked expression inside a flow mapping (r7 N3 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: "${{ !cancelled() }}"}\n        run: echo\n'))],
   ['a - item key line with trailing whitespace and a mapping below (r8 N1 accept)', wf(WENV, JOB('', '      - env: \n          V: 1\n        run: echo\n'))],
   ['a simple quoted key with spaces (r8 accept)', wf(WENV, JOB('', '      - name: i\n        with:\n          "a b": c\n        run: echo\n'))],
-  ['a flow mapping whose quoted value holds a brace (r9 accept)', wf(WENV, JOB('', '      - name: i\n        with: {a: "}"}\n        run: echo\n'))],
-  ['a single-line flow sequence with an expression (r9 accept)', wf(WENV, JOB('', '      - name: i\n        with: [a, "${{ github.ref }}"]\n        run: echo\n'))],
+  ['a block-list branches: and an expression if: with quotes inside the expression (a4 accept)', 'on:\n  push:\n    branches:\n      - dev\n      - main\n' + wf(WENV, JOB('', "      - name: i\n        if: ${{ github.event_name == 'pull_request' }}\n        run: echo\n"))],
+  ['a whole single-quoted and a whole double-quoted scalar value, and a quoted - item (a4 accept)', wf(WENV, JOB('', "      - name: 'x y'\n        run: echo\n      - name: \"a [b] {c}\"\n        run: echo\n      - \"echo hi\"\n"))],
+  ['a quoted scalar with a trailing comment (a4 accept)', wf(WENV, JOB('', '      - name: "x" # why\n        run: echo\n'))],
+  ['a quote and brackets inside a | body (a4 accept)', wf(WENV, JOB('', "      - run: |\n          echo \"it's [x] {y}\"\n"))],
+  ['a bracket inside a comment (a4 accept)', wf(WENV, JOB('', '      - name: i # see [x] and it\'s\n        run: echo\n'))],
   ['jobs: with a trailing comment and 2-space jobs', WENV + 'jobs: # x\n' + JOB('', NPMSTEP)],
 ]) {
   const r = violations('fixture.yml', t);
@@ -927,7 +960,7 @@ for (const [label, t] of [
 }
 
 // And a matching good fixture passes, so the rejections are not blanket.
-const good = wrap(CO + CHECK + '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: npm install -g --ignore-scripts "x@$V"\n      - name: q\n        run: v="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"\n');
+const good = wrap(CO + CHECK + '      - name: i\n        env:\n          V: ${{ steps.q.outputs.version }}\n        run: |\n          npm install -g --ignore-scripts "x@$V"\n      - name: q\n        run: |\n          v="$(bash scripts/ci/read-quest-version.sh CLAUDE.md)"\n');
 violations('good.yml', good).length === 0 ? ok('accepts a compliant fixture') : no('rejected a compliant fixture', JSON.stringify(violations('good.yml', good)));
 // A backslash-continued install WITH the flag on the continuation line passes: the
 // join must not turn a compliant command into a violation.
@@ -955,7 +988,7 @@ for (const [label, run] of [
   ['a quoted run value', '"npm ci --ignore-scripts"'],
   ['a repeated --ignore-scripts and --ignore-scripts=true', 'npm install -g --ignore-scripts --ignore-scripts=true "x@1.2.3"'],
 ]) {
-  const t = wrap(CO + CHECK + `      - shell: bash\n        run: ${run}\n`);
+  const t = wrap(CO + CHECK + `      - shell: bash\n        run: |\n          ${run}\n`);
   violations('goodflag.yml', t).length === 0 ? ok(`accepts: ${label}`) : no(`rejected a compliant form: ${label}`, JSON.stringify(violations('goodflag.yml', t)));
 }
 
@@ -974,5 +1007,5 @@ for (const [label, t] of [
   ? ok('the workflow file filter takes .yml and .yaml only') : no('the workflow file filter is wrong');
 
 console.log(`\npassed ${pass}, failed ${fail}`);
-if (pass < 297) { console.log('ran fewer than the 297 expected passing cases'); process.exit(1); }
+if (pass < 315) { console.log('ran fewer than the 315 expected passing cases'); process.exit(1); }
 process.exit(fail === 0 ? 0 : 1);
